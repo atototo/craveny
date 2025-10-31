@@ -36,10 +36,11 @@ def init_database():
         print(f"   ✅ telegram_users (텔레그램 사용자)")
 
         # 연결 테스트
+        from sqlalchemy import text
         from sqlalchemy.orm import sessionmaker
         Session = sessionmaker(bind=engine)
         session = Session()
-        result = session.execute("SELECT 1")
+        result = session.execute(text("SELECT 1"))
         session.close()
 
         print(f"\n✅ 데이터베이스 초기화 완료!")
