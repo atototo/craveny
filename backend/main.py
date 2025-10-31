@@ -44,10 +44,10 @@ async def startup_event():
     """애플리케이션 시작 이벤트"""
     logger.info(f"🚀 {settings.APP_NAME} 애플리케이션 시작")
 
-    # APScheduler 시작
-    scheduler = get_crawler_scheduler(interval_minutes=10)
+    # APScheduler 시작 (뉴스: 10분, 주가: 1분)
+    scheduler = get_crawler_scheduler(news_interval_minutes=10, stock_interval_minutes=1)
     scheduler.start()
-    logger.info("✅ 뉴스 크롤러 스케줄러 시작")
+    logger.info("✅ 크롤러 스케줄러 시작 (뉴스 + 주가)")
 
 
 @app.on_event("shutdown")
@@ -58,7 +58,7 @@ async def shutdown_event():
     # APScheduler 종료
     scheduler = get_crawler_scheduler()
     scheduler.shutdown()
-    logger.info("✅ 뉴스 크롤러 스케줄러 종료")
+    logger.info("✅ 크롤러 스케줄러 종료 (뉴스 + 주가)")
 
 
 @app.get("/")

@@ -1,0 +1,244 @@
+{
+  "stocks": [
+    {
+      "code": "005930",
+      "name": "삼성전자",
+      "priority": 1
+    },
+    {
+      "code": "000660",
+      "name": "SK하이닉스",
+      "priority": 1
+    },
+    {
+      "code": "035420",
+      "name": "NAVER",
+      "priority": 1
+    },
+    {
+      "code": "035720",
+      "name": "카카오",
+      "priority": 1
+    },
+    {
+      "code": "005380",
+      "name": "현대차",
+      "priority": 1
+    },
+    {
+      "code": "000270",
+      "name": "기아",
+      "priority": 1
+    },
+    {
+      "code": "066570",
+      "name": "LG전자",
+      "priority": 1
+    },
+    {
+      "code": "051910",
+      "name": "LG화학",
+      "priority": 1
+    },
+    {
+      "code": "207940",
+      "name": "삼성바이오로직스",
+      "priority": 1
+    },
+    {
+      "code": "068270",
+      "name": "셀트리온",
+      "priority": 1
+    },
+    {
+      "code": "006400",
+      "name": "삼성SDI",
+      "priority": 2
+    },
+    {
+      "code": "005490",
+      "name": "POSCO홀딩스",
+      "priority": 2
+    },
+    {
+      "code": "373220",
+      "name": "LG에너지솔루션",
+      "priority": 2
+    },
+    {
+      "code": "105560",
+      "name": "KB금융",
+      "priority": 2
+    },
+    {
+      "code": "055550",
+      "name": "신한지주",
+      "priority": 2
+    },
+    {
+      "code": "086790",
+      "name": "하나금융지주",
+      "priority": 2
+    },
+    {
+      "code": "096770",
+      "name": "SK이노베이션",
+      "priority": 2
+    },
+    {
+      "code": "034730",
+      "name": "SK",
+      "priority": 2
+    },
+    {
+      "code": "012330",
+      "name": "현대모비스",
+      "priority": 2
+    },
+    {
+      "code": "028260",
+      "name": "삼성물산",
+      "priority": 2
+    },
+    {
+      "code": "051900",
+      "name": "LG생활건강",
+      "priority": 3
+    },
+    {
+      "code": "032830",
+      "name": "삼성생명",
+      "priority": 3
+    },
+    {
+      "code": "015760",
+      "name": "한국전력",
+      "priority": 3
+    },
+    {
+      "code": "017670",
+      "name": "SK텔레콤",
+      "priority": 3
+    },
+    {
+      "code": "030200",
+      "name": "KT",
+      "priority": 3
+    },
+    {
+      "code": "003550",
+      "name": "LG",
+      "priority": 3
+    },
+    {
+      "code": "009150",
+      "name": "삼성전기",
+      "priority": 3
+    },
+    {
+      "code": "402340",
+      "name": "SK스퀘어",
+      "priority": 3
+    },
+    {
+      "code": "024110",
+      "name": "기업은행",
+      "priority": 3
+    },
+    {
+      "code": "316140",
+      "name": "우리금융지주",
+      "priority": 3
+    },
+    {
+      "code": "011200",
+      "name": "HMM",
+      "priority": 4
+    },
+    {
+      "code": "000880",
+      "name": "한화",
+      "priority": 4
+    },
+    {
+      "code": "034020",
+      "name": "두산에너빌리티",
+      "priority": 4
+    },
+    {
+      "code": "001040",
+      "name": "CJ",
+      "priority": 4
+    },
+    {
+      "code": "011170",
+      "name": "롯데케미칼",
+      "priority": 4
+    },
+    {
+      "code": "078930",
+      "name": "GS",
+      "priority": 4
+    },
+    {
+      "code": "006260",
+      "name": "LS",
+      "priority": 4
+    },
+    {
+      "code": "000720",
+      "name": "현대건설",
+      "priority": 4
+    },
+    {
+      "code": "000210",
+      "name": "대림산업",
+      "priority": 4
+    },
+    {
+      "code": "021240",
+      "name": "코웨이",
+      "priority": 4
+    },
+    {
+      "code": "090430",
+      "name": "아모레퍼시픽",
+      "priority": 5
+    },
+    {
+      "code": "032640",
+      "name": "LG유플러스",
+      "priority": 5
+    },
+    {
+      "code": "036570",
+      "name": "엔씨소프트",
+      "priority": 5
+    },
+    {
+      "code": "251270",
+      "name": "넷마블",
+      "priority": 5
+    },
+    {
+      "code": "259960",
+      "name": "크래프톤",
+      "priority": 5
+    },
+    {
+      "code": "000810",
+      "name": "삼성화재",
+      "priority": 5
+    },
+    {
+      "code": "005830",
+      "name": "DB손해보험",
+      "priority": 5
+    },
+    {
+      "code": "138040",
+      "name": "메리츠금융지주",
+      "priority": 5
+    }
+  ]
+}

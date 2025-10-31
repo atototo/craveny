@@ -97,3 +97,8 @@ description = "증권 뉴스 예측 및 텔레그램 알림 시스템"
 requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
+exclude = ["data*", "infrastructure*", "scripts*", "tests*"]
