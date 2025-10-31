@@ -8,12 +8,14 @@ from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from backend.crawlers.naver_crawler import NaverNewsCrawler
 from backend.crawlers.hankyung_crawler import HankyungNewsCrawler
 from backend.crawlers.maeil_crawler import MaeilNewsCrawler
 from backend.crawlers.news_saver import NewsSaver
 from backend.crawlers.stock_crawler import get_stock_crawler
+from backend.crawlers.news_stock_matcher import run_daily_matching
 from backend.utils.market_time import is_market_open
 from backend.db.session import SessionLocal
 
@@ -48,6 +50,11 @@ class CrawlerScheduler:
         self.stock_total_stocks = 0
         self.stock_total_saved = 0
         self.stock_total_errors = 0
+
+        # 뉴스-주가 매칭 통계
+        self.matching_total_runs = 0
+        self.matching_total_success = 0
+        self.matching_total_fail = 0
 
     def _crawl_all_sources(self) -> None:
         """
@@ -199,6 +206,48 @@ class CrawlerScheduler:
             self.stock_total_errors += 1
             logger.error(f"❌ 주가 수집 중 예상치 못한 에러: {e}")
 
+    def _match_news_with_stocks(self) -> None:
+        """
+        뉴스-주가 매칭 작업을 실행합니다.
+        매일 장 마감 후(15:40)에 실행됩니다.
+        """
+        logger.info("=" * 60)
+        logger.info(f"🔗 뉴스-주가 매칭 시작 (#{self.matching_total_runs + 1})")
+        logger.info("=" * 60)
+
+        db = SessionLocal()
+
+        try:
+            # 일일 매칭 실행 (최근 7일 뉴스 대상)
+            success_count, fail_count = run_daily_matching(db, lookback_days=7)
+
+            # 통계 업데이트
+            self.matching_total_runs += 1
+            self.matching_total_success += success_count
+            self.matching_total_fail += fail_count
+
+            # 성공률 계산
+            total_attempts = self.matching_total_success + self.matching_total_fail
+            success_rate = (
+                (self.matching_total_success / total_attempts * 100) if total_attempts > 0 else 0
+            )
+
+            logger.info("=" * 60)
+            logger.info(f"✅ 뉴스-주가 매칭 완료: 성공 {success_count}건, 실패 {fail_count}건")
+            logger.info(
+                f"📊 매칭 전체 통계: 실행 {self.matching_total_runs}회, "
+                f"성공 {self.matching_total_success}건, "
+                f"실패 {self.matching_total_fail}건, "
+                f"성공률 {success_rate:.1f}%"
+            )
+            logger.info("=" * 60)
+
+        except Exception as e:
+            logger.error(f"❌ 뉴스-주가 매칭 중 예상치 못한 에러: {e}")
+
+        finally:
+            db.close()
+
     def start(self) -> None:
         """스케줄러를 시작합니다."""
         if self.is_running:
@@ -229,6 +278,16 @@ class CrawlerScheduler:
             trigger=stock_trigger,
             id="stock_collector_job",
             name="주가 수집기",
+            replace_existing=True,
+        )
+
+        # 뉴스-주가 매칭 작업 등록 (매일 15:40)
+        matching_trigger = CronTrigger(hour=15, minute=40)
+        self.scheduler.add_job(
+            func=self._match_news_with_stocks,
+            trigger=matching_trigger,
+            id="news_stock_matching_job",
+            name="뉴스-주가 매칭",
             replace_existing=True,
         )
 
@@ -267,7 +326,7 @@ class CrawlerScheduler:
         크롤링 통계를 반환합니다.
 
         Returns:
-            통계 딕셔너리 (뉴스 및 주가 통계)
+            통계 딕셔너리 (뉴스, 주가, 매칭 통계)
         """
         # 뉴스 성공률
         news_success_rate = (
@@ -280,6 +339,14 @@ class CrawlerScheduler:
         stock_success_rate = (
             (self.stock_total_crawls - self.stock_total_errors) / self.stock_total_crawls * 100
             if self.stock_total_crawls > 0
+            else 0
+        )
+
+        # 매칭 성공률
+        total_matching_attempts = self.matching_total_success + self.matching_total_fail
+        matching_success_rate = (
+            (self.matching_total_success / total_matching_attempts * 100)
+            if total_matching_attempts > 0
             else 0
         )
 
@@ -297,6 +364,12 @@ class CrawlerScheduler:
                 "total_saved": self.stock_total_saved,
                 "total_errors": self.stock_total_errors,
                 "success_rate": round(stock_success_rate, 2),
+            },
+            "matching": {
+                "total_runs": self.matching_total_runs,
+                "total_success": self.matching_total_success,
+                "total_fail": self.matching_total_fail,
+                "success_rate": round(matching_success_rate, 2),
             },
             "is_running": self.is_running,
         }
