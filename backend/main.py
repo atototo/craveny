@@ -1,10 +1,20 @@
 """
 Craveny FastAPI 애플리케이션 진입점
 """
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
+from backend.scheduler.crawler_scheduler import get_crawler_scheduler
+
+
+# 로깅 설정
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -32,14 +42,23 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """애플리케이션 시작 이벤트"""
-    print(f"🚀 {settings.APP_NAME} 애플리케이션 시작")
-    # TODO: APScheduler 시작
+    logger.info(f"🚀 {settings.APP_NAME} 애플리케이션 시작")
+
+    # APScheduler 시작
+    scheduler = get_crawler_scheduler(interval_minutes=10)
+    scheduler.start()
+    logger.info("✅ 뉴스 크롤러 스케줄러 시작")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """애플리케이션 종료 이벤트"""
-    print(f"🛑 {settings.APP_NAME} 애플리케이션 종료")
+    logger.info(f"🛑 {settings.APP_NAME} 애플리케이션 종료")
+
+    # APScheduler 종료
+    scheduler = get_crawler_scheduler()
+    scheduler.shutdown()
+    logger.info("✅ 뉴스 크롤러 스케줄러 종료")
 
 
 @app.get("/")
