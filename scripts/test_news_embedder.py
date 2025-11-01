@@ -193,13 +193,13 @@ def test_milvus_query():
         if count > 0:
             results = collection.query(
                 expr="",
-                output_fields=["news_id", "stock_code"],
+                output_fields=["news_article_id", "stock_code"],
                 limit=3,
             )
 
             logger.info("   최근 3건:")
             for result in results:
-                logger.info(f"      뉴스 ID: {result['news_id']}, 종목: {result.get('stock_code', 'N/A')}")
+                logger.info(f"      뉴스 ID: {result['news_article_id']}, 종목: {result.get('stock_code', 'N/A')}")
 
         logger.info("")
         return True

@@ -43,6 +43,7 @@ class NewsEmbedder:
             response = self.openai_client.embeddings.create(
                 model=self.embedding_model,
                 input=text,
+                dimensions=self.embedding_dim,  # 768차원으로 명시
             )
 
             embedding = response.data[0].embedding
@@ -98,14 +99,14 @@ class NewsEmbedder:
             collection = Collection("news_embeddings")
             collection.load()
 
-            # Milvus에 이미 저장된 news_id 조회
+            # Milvus에 이미 저장된 news_article_id 조회
             results = collection.query(
                 expr="",  # 모든 레코드
-                output_fields=["news_id"],
+                output_fields=["news_article_id"],
                 limit=16384,  # 최대 조회 개수
             )
 
-            embedded_news_ids = set(r["news_id"] for r in results)
+            embedded_news_ids = set(r["news_article_id"] for r in results)
             logger.info(f"Milvus에 이미 저장된 뉴스: {len(embedded_news_ids)}건")
 
         except Exception as e:
