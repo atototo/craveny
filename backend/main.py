@@ -33,10 +33,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 라우터 등록 (나중에 추가)
-# from backend.api import health, metrics
-# app.include_router(health.router, tags=["Health"])
-# app.include_router(metrics.router, tags=["Monitoring"])
+# 라우터 등록
+from backend.api import health
+app.include_router(health.router, tags=["Health"])
 
 
 @app.on_event("startup")
@@ -68,17 +67,6 @@ async def root():
         "message": f"{settings.APP_NAME} API",
         "version": "1.0.0",
         "docs": "/docs",
-        "health": "/health"
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """헬스체크 엔드포인트 (기본)"""
-    # TODO: PostgreSQL, Milvus, Redis 연결 체크
-    return {
-        "status": "healthy",
-        "postgres": True,  # TODO: 실제 체크
-        "milvus": True,    # TODO: 실제 체크
-        "redis": True,     # TODO: 실제 체크
+        "health": "/health",
+        "stats": "/stats",
     }
