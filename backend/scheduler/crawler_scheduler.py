@@ -16,6 +16,7 @@ from backend.crawlers.maeil_crawler import MaeilNewsCrawler
 from backend.crawlers.news_saver import NewsSaver
 from backend.crawlers.stock_crawler import get_stock_crawler
 from backend.crawlers.news_stock_matcher import run_daily_matching
+from backend.llm.embedder import run_daily_embedding
 from backend.utils.market_time import is_market_open
 from backend.db.session import SessionLocal
 
@@ -55,6 +56,11 @@ class CrawlerScheduler:
         self.matching_total_runs = 0
         self.matching_total_success = 0
         self.matching_total_fail = 0
+
+        # 뉴스 임베딩 통계
+        self.embedding_total_runs = 0
+        self.embedding_total_success = 0
+        self.embedding_total_fail = 0
 
     def _crawl_all_sources(self) -> None:
         """
@@ -248,6 +254,45 @@ class CrawlerScheduler:
         finally:
             db.close()
 
+    def _embed_news(self) -> None:
+        """
+        뉴스 임베딩 작업을 실행합니다.
+        매일 장 마감 후(16:00)에 실행됩니다.
+        """
+        logger.info("=" * 60)
+        logger.info(f"🔤 뉴스 임베딩 시작 (#{self.embedding_total_runs + 1})")
+        logger.info("=" * 60)
+
+        try:
+            # 일일 임베딩 실행 (배치 100건)
+            success_count, fail_count = run_daily_embedding(batch_size=100)
+
+            # 통계 업데이트
+            self.embedding_total_runs += 1
+            self.embedding_total_success += success_count
+            self.embedding_total_fail += fail_count
+
+            # 성공률 계산
+            total_attempts = self.embedding_total_success + self.embedding_total_fail
+            success_rate = (
+                (self.embedding_total_success / total_attempts * 100)
+                if total_attempts > 0
+                else 0
+            )
+
+            logger.info("=" * 60)
+            logger.info(f"✅ 뉴스 임베딩 완료: 성공 {success_count}건, 실패 {fail_count}건")
+            logger.info(
+                f"📊 임베딩 전체 통계: 실행 {self.embedding_total_runs}회, "
+                f"성공 {self.embedding_total_success}건, "
+                f"실패 {self.embedding_total_fail}건, "
+                f"성공률 {success_rate:.1f}%"
+            )
+            logger.info("=" * 60)
+
+        except Exception as e:
+            logger.error(f"❌ 뉴스 임베딩 중 예상치 못한 에러: {e}")
+
     def start(self) -> None:
         """스케줄러를 시작합니다."""
         if self.is_running:
@@ -291,6 +336,16 @@ class CrawlerScheduler:
             replace_existing=True,
         )
 
+        # 뉴스 임베딩 작업 등록 (매일 16:00)
+        embedding_trigger = CronTrigger(hour=16, minute=0)
+        self.scheduler.add_job(
+            func=self._embed_news,
+            trigger=embedding_trigger,
+            id="news_embedding_job",
+            name="뉴스 임베딩",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         self.is_running = True
 
@@ -326,7 +381,7 @@ class CrawlerScheduler:
         크롤링 통계를 반환합니다.
 
         Returns:
-            통계 딕셔너리 (뉴스, 주가, 매칭 통계)
+            통계 딕셔너리 (뉴스, 주가, 매칭, 임베딩 통계)
         """
         # 뉴스 성공률
         news_success_rate = (
@@ -350,6 +405,14 @@ class CrawlerScheduler:
             else 0
         )
 
+        # 임베딩 성공률
+        total_embedding_attempts = self.embedding_total_success + self.embedding_total_fail
+        embedding_success_rate = (
+            (self.embedding_total_success / total_embedding_attempts * 100)
+            if total_embedding_attempts > 0
+            else 0
+        )
+
         return {
             "news": {
                 "total_crawls": self.news_total_crawls,
@@ -370,6 +433,12 @@ class CrawlerScheduler:
                 "total_success": self.matching_total_success,
                 "total_fail": self.matching_total_fail,
                 "success_rate": round(matching_success_rate, 2),
+            },
+            "embedding": {
+                "total_runs": self.embedding_total_runs,
+                "total_success": self.embedding_total_success,
+                "total_fail": self.embedding_total_fail,
+                "success_rate": round(embedding_success_rate, 2),
             },
             "is_running": self.is_running,
         }
