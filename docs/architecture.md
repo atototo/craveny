@@ -1,8 +1,8 @@
 # Craveny Fullstack Architecture Document
 
-**버전:** 1.0
-**날짜:** 2025-10-31
-**상태:** 초안
+**버전:** 2.0
+**날짜:** 2025-11-02
+**상태:** Phase 2 완료 (Epic 1 & Epic 2)
 
 ---
 
@@ -54,6 +54,7 @@
 | 날짜 | 버전 | 설명 | 작성자 |
 |------|------|------|--------|
 | 2025-10-31 | 1.0 | PRD v1.1 기반 초기 아키텍처 문서 생성 | Winston (Architect) |
+| 2025-11-02 | 2.0 | Epic 1 & Epic 2 Phase 2 완료 반영: Next.js Frontend, API 확장, LLM 예측, 텔레그램 알림 | Winston (Architect) |
 
 ---
 
@@ -61,17 +62,18 @@
 
 ### 2.1 기술 요약
 
-Craveny는 **Monolith 아키텍처** 기반의 단일 FastAPI 애플리케이션으로 구성됩니다. 뉴스/주가 데이터 수집, LLM 기반 예측, 텔레그램 알림 전송을 하나의 통합된 백엔드 서비스에서 처리합니다.
+Craveny는 **Full-Stack Monolith 아키텍처**로 구성됩니다. Next.js 웹 대시보드, FastAPI 백엔드, 텔레그램 봇이 통합된 시스템에서 뉴스/주가 데이터 수집, LLM 기반 예측, 다채널 알림 전송을 처리합니다.
 
 **핵심 구성:**
-- **백엔드:** Python 3.11+ FastAPI로 RESTful API 및 비동기 작업 처리
-- **프론트엔드:** 텔레그램 봇 (별도 웹/앱 UI 없음)
-- **데이터 파이프라인:** APScheduler로 주기적 크롤링, Celery로 비동기 LLM 분석
-- **AI/ML:** OpenAI GPT-4o-mini (예측), text-embedding-3-small (768차원 벡터)
-- **데이터 저장:** PostgreSQL (관계형 데이터), Milvus (벡터 검색), Redis (Celery 큐)
+- **프론트엔드:** Next.js 15 (App Router) - 사용자/관리자 대시보드, 종목 분석 페이지
+- **백엔드:** Python 3.11+ FastAPI - RESTful API, 비동기 작업 처리, LLM 예측
+- **데이터 파이프라인:** APScheduler (주기적 크롤링), Celery (비동기 LLM 분석)
+- **알림 채널:** 텔레그램 봇 (python-telegram-bot), 웹 대시보드 (실시간 업데이트)
+- **AI/ML:** OpenAI GPT-4o (예측 생성), text-embedding-3-small (768차원 벡터)
+- **데이터 저장:** PostgreSQL (관계형 데이터), Milvus (벡터 검색), Redis (캐싱/큐)
 - **배포:** Docker Compose로 모든 서비스 오케스트레이션, AWS EC2 단일 인스턴스 배포
 
-이 아키텍처는 2주 MVP 목표, 100명 사용자 규모, $100 이하 비용 제약을 충족하며, Phase 2에서 마이크로서비스로 전환 가능한 확장성을 제공합니다.
+이 아키텍처는 Epic 1 (데이터 인프라) 및 Epic 2 Phase 2 (LLM 예측 & 알림)를 완료하였으며, 웹 UI를 통한 사용자 경험 개선과 관리자 모니터링 기능을 제공합니다.
 
 ### 2.2 플랫폼 및 인프라 선택
 
@@ -120,7 +122,8 @@ Craveny는 **Monolith 아키텍처** 기반의 단일 FastAPI 애플리케이션
 ```mermaid
 graph TB
     subgraph "사용자"
-        U[텔레그램 사용자<br/>20명 목표]
+        WEB_USER[웹 사용자<br/>대시보드 접속]
+        TEL_USER[텔레그램 사용자<br/>알림 구독]
     end
 
     subgraph "외부 데이터 소스"
@@ -129,44 +132,55 @@ graph TB
     end
 
     subgraph "AWS EC2 t3.small - Docker Compose"
+        subgraph "프론트엔드"
+            NEXTJS[Next.js 15<br/>포트 3000<br/>App Router]
+        end
+
         subgraph "FastAPI 애플리케이션"
-            API[FastAPI Server<br/>포트 8000]
+            API[FastAPI Server<br/>포트 8000<br/>REST API]
             CRAWLER[크롤러<br/>APScheduler]
-            CELERY[Celery Worker<br/>비동기 작업]
+            CELERY[Celery Worker<br/>비동기 LLM 분석]
             BOT[텔레그램 봇<br/>python-telegram-bot]
         end
 
         subgraph "데이터 레이어"
-            PG[(PostgreSQL<br/>뉴스/주가/사용자)]
+            PG[(PostgreSQL<br/>뉴스/주가/예측)]
             MILVUS[(Milvus<br/>벡터 검색)]
-            REDIS[(Redis<br/>Celery 큐)]
+            REDIS[(Redis<br/>캐싱/큐)]
             ETCD[etcd]
             MINIO[MinIO]
         end
     end
 
     subgraph "외부 AI 서비스"
-        OPENAI[OpenAI API<br/>GPT-4o-mini<br/>text-embedding-3-small]
+        OPENAI[OpenAI API<br/>GPT-4o<br/>text-embedding-3-small]
     end
 
     subgraph "백업 스토리지"
         S3[AWS S3<br/>일일/주간 백업]
     end
 
-    U -->|/start, /stop| BOT
-    BOT -->|알림 전송| U
+    WEB_USER -->|대시보드 접속| NEXTJS
+    NEXTJS -->|API 프록시| API
+    API -->|데이터 제공| NEXTJS
+
+    TEL_USER -->|/start, /stop| BOT
+    BOT -->|알림 전송| TEL_USER
 
     CRAWLER -->|10분 주기| NEWS
     CRAWLER -->|1분 주기| STOCK
     CRAWLER -->|저장| PG
 
-    API -->|헬스체크/메트릭| API
+    API -->|REST API| PG
+    API -->|벡터 검색| MILVUS
+    API -->|캐싱| REDIS
 
     CELERY -->|새 뉴스 감지| PG
     CELERY -->|임베딩| OPENAI
     CELERY -->|벡터 저장| MILVUS
     CELERY -->|유사도 검색| MILVUS
     CELERY -->|LLM 예측| OPENAI
+    CELERY -->|예측 저장| PG
     CELERY -->|알림 트리거| BOT
     CELERY -->|작업 큐| REDIS
 
@@ -176,7 +190,9 @@ graph TB
     PG -.->|일일 백업| S3
     MILVUS -.->|주간 백업| S3
 
-    style U fill:#e1f5ff
+    style WEB_USER fill:#e1f5ff
+    style TEL_USER fill:#e1f5ff
+    style NEXTJS fill:#d4f1f4
     style OPENAI fill:#fff4e1
     style S3 fill:#f0f0f0
 ```
@@ -209,6 +225,10 @@ graph TB
 
 | 카테고리 | 기술 | 버전 | 목적 | 선택 근거 |
 |---------|------|------|------|-----------|
+| **프론트엔드 프레임워크** | Next.js | 15.1.4 | 웹 대시보드, 사용자/관리자 UI | React SSR, App Router, 빠른 개발, API 프록시 내장 |
+| **프론트엔드 언어** | TypeScript | 5.x | 타입 안전 프론트엔드 개발 | 타입 안정성, IDE 지원, 런타임 오류 방지 |
+| **UI 라이브러리** | React | 19.x | 컴포넌트 기반 UI 구축 | Next.js 기본, 풍부한 생태계, 팀 경험 |
+| **CSS 프레임워크** | Tailwind CSS | 3.x | 유틸리티 퍼스트 스타일링 | 빠른 개발, 일관된 디자인, Next.js 통합 |
 | **백엔드 언어** | Python | 3.11+ | 백엔드 개발, 데이터 처리, ML 통합 | 데이터/ML/API에 최적, 풍부한 라이브러리 생태계, 팀 숙련도 |
 | **백엔드 프레임워크** | FastAPI | 0.104+ | RESTful API, 비동기 처리, 헬스체크 엔드포인트 | 비동기 우수, 자동 문서화, 타입 힌트 지원, 빠른 개발 속도 |
 | **API 스타일** | REST | - | 헬스체크/메트릭 조회 API | 단순 CRUD 충분, 텔레그램 봇이 주 인터페이스 |
@@ -434,7 +454,127 @@ class Prediction(BaseModel):
     similar_news: list[int] = Field(default_factory=list, max_length=5)
 ```
 
-### 4.7 데이터 모델 관계도
+### 4.7 Prediction (예측 결과 저장 - PostgreSQL)
+
+**목적:** LLM 예측 결과를 PostgreSQL에 영구 저장 (분석 이력, API 조회)
+
+**주요 속성:**
+- `id`: int - 고유 식별자 (Primary Key)
+- `news_id`: int - 뉴스 ID (Foreign Key → News.id)
+- `stock_code`: str - 종목코드 (인덱스)
+- `direction`: str - 예측 방향 ("up", "down", "hold")
+- `confidence`: float - 예측 신뢰도 (0.0 ~ 1.0)
+- `reasoning`: str - 예측 근거 (Text)
+- `current_price`: float - 예측 시점 현재가
+- `target_period`: str - 예측 기간 (예: "1일", "1주일")
+- `created_at`: datetime - 예측 생성 시간
+- `short_term`: str - T+1일 예측 (Text)
+- `medium_term`: str - T+3일 예측 (Text)
+- `long_term`: str - T+5일 예측 (Text)
+- `confidence_breakdown`: dict - 신뢰도 구성 요소 (JSON)
+- `pattern_analysis`: dict - 패턴 분석 통계 (JSON)
+
+**SQLAlchemy 모델:**
+
+```python
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Index, JSON
+from datetime import datetime
+from backend.db.base import Base
+
+class Prediction(Base):
+    __tablename__ = "predictions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    news_id = Column(Integer, ForeignKey("news_articles.id"), nullable=False)
+    stock_code = Column(String(10), nullable=False, index=True)
+    direction = Column(String(10), nullable=False)  # up, down, hold
+    confidence = Column(Float, nullable=False)  # 0.0 ~ 1.0
+    reasoning = Column(Text, nullable=True)
+    current_price = Column(Float, nullable=True)
+    target_period = Column(String(20), default="1일", nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+    # 기간별 예측
+    short_term = Column(Text, nullable=True)
+    medium_term = Column(Text, nullable=True)
+    long_term = Column(Text, nullable=True)
+
+    # 신뢰도 & 패턴 분석
+    confidence_breakdown = Column(JSON, nullable=True)
+    pattern_analysis = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("idx_predictions_stock_code_created", "stock_code", "created_at"),
+        Index("idx_predictions_news_id", "news_id"),
+    )
+```
+
+**관계:**
+- `News` (N:1): 하나의 뉴스는 여러 예측을 생성할 수 있음 (시점별)
+- `API 조회`: `/api/predictions?stock_code=005930` 형태로 조회 가능
+
+### 4.8 StockAnalysisSummary (종목 분석 요약 - PostgreSQL)
+
+**목적:** 종목별 AI 투자 분석 리포트 캐시 (LLM 생성 콘텐츠 + 통계)
+
+**주요 속성:**
+- `id`: int - 고유 식별자 (Primary Key)
+- `stock_code`: str - 종목코드 (Unique, 인덱스)
+- `overall_summary`: str - 종합 의견 (Text)
+- `short_term_scenario`: str - 단기 투자 시나리오 (Text)
+- `medium_term_scenario`: str - 중기 투자 시나리오 (Text)
+- `long_term_scenario`: str - 장기 투자 시나리오 (Text)
+- `risk_factors`: list[str] - 리스크 요인 리스트 (JSON)
+- `opportunity_factors`: list[str] - 기회 요인 리스트 (JSON)
+- `recommendation`: str - 최종 추천 (Text)
+- `total_predictions`: int - 총 예측 건수
+- `up_count`: int - 상승 예측 건수
+- `down_count`: int - 하락 예측 건수
+- `hold_count`: int - 보합 예측 건수
+- `avg_confidence`: float - 평균 신뢰도
+- `last_updated`: datetime - 마지막 업데이트 시각
+- `based_on_prediction_count`: int - 분석에 사용된 예측 건수
+
+**SQLAlchemy 모델:**
+
+```python
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Float
+from datetime import datetime
+from backend.db.base import Base
+
+class StockAnalysisSummary(Base):
+    __tablename__ = "stock_analysis_summaries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock_code = Column(String(10), unique=True, nullable=False, index=True)
+
+    # LLM 생성 콘텐츠
+    overall_summary = Column(Text, nullable=True)
+    short_term_scenario = Column(Text, nullable=True)
+    medium_term_scenario = Column(Text, nullable=True)
+    long_term_scenario = Column(Text, nullable=True)
+    risk_factors = Column(JSON, nullable=True)
+    opportunity_factors = Column(JSON, nullable=True)
+    recommendation = Column(Text, nullable=True)
+
+    # 통계 데이터
+    total_predictions = Column(Integer, default=0)
+    up_count = Column(Integer, default=0)
+    down_count = Column(Integer, default=0)
+    hold_count = Column(Integer, default=0)
+    avg_confidence = Column(Float, nullable=True)
+
+    # 메타 정보
+    last_updated = Column(DateTime, default=datetime.now, nullable=False)
+    based_on_prediction_count = Column(Integer, default=0)
+```
+
+**관계:**
+- `Prediction` (읽기 전용): 기존 예측 데이터를 기반으로 주기적 재생성
+- `API 조회`: `/api/stocks/{stock_code}/analysis` 엔드포인트에서 반환
+- **캐시 정책**: 24시간 TTL, 예측 10건 이상 변경 시 재생성
+
+### 4.9 데이터 모델 관계도
 
 ```mermaid
 erDiagram
@@ -442,6 +582,7 @@ erDiagram
     News ||--|| NewsEmbedding : "has"
     StockPrice ||--o{ NewsStockMatch : "references"
     News ||--o{ Prediction : "generates"
+    Prediction }o--|| StockAnalysisSummary : "aggregates_to"
 
     News {
         int id PK
@@ -492,15 +633,39 @@ erDiagram
     }
 
     Prediction {
-        int news_id
+        int id PK
+        int news_id FK
         string stock_code
         string direction
-        float probability
-        float impact_score
-        float expected_change
-        int duration_days
-        string reasoning
-        int[] similar_news
+        float confidence
+        text reasoning
+        float current_price
+        string target_period
+        datetime created_at
+        text short_term
+        text medium_term
+        text long_term
+        json confidence_breakdown
+        json pattern_analysis
+    }
+
+    StockAnalysisSummary {
+        int id PK
+        string stock_code UK
+        text overall_summary
+        text short_term_scenario
+        text medium_term_scenario
+        text long_term_scenario
+        json risk_factors
+        json opportunity_factors
+        text recommendation
+        int total_predictions
+        int up_count
+        int down_count
+        int hold_count
+        float avg_confidence
+        datetime last_updated
+        int based_on_prediction_count
     }
 ```
 
@@ -508,9 +673,11 @@ erDiagram
 
 ## 5. API 명세
 
-Craveny는 **텔레그램 봇이 주 인터페이스**이므로, REST API는 헬스체크, 모니터링, 내부 관리 목적으로만 제공됩니다.
+Craveny는 **Next.js 웹 대시보드와 텔레그램 봇 이중 인터페이스**를 제공합니다. REST API는 사용자 대시보드, 관리자 모니터링, 종목 분석 조회를 지원합니다.
 
 ### 5.1 REST API Specification (OpenAPI 3.0)
+
+**Base URL:** `http://localhost:8000/api`
 
 **주요 엔드포인트:**
 
@@ -555,6 +722,156 @@ Craveny는 **텔레그램 봇이 주 인터페이스**이므로, REST API는 헬
   "total_active_users": 18,
   "celery_queue_size": 2,
   "openai_api_cost_today": 1.47
+}
+```
+
+#### GET /api/dashboard/stats
+
+관리자 대시보드 통계를 조회합니다 (총 예측 수, 평균 신뢰도, 방향별 분포).
+
+**응답 200:**
+```json
+{
+  "total_predictions": 1247,
+  "avg_confidence": 0.78,
+  "direction_distribution": {
+    "up": 587,
+    "down": 423,
+    "hold": 237
+  },
+  "recent_predictions": [
+    {
+      "id": 1250,
+      "stock_code": "005930",
+      "direction": "up",
+      "confidence": 0.85,
+      "created_at": "2025-11-02T10:30:15+09:00"
+    }
+  ]
+}
+```
+
+#### GET /api/news
+
+뉴스 목록을 조회합니다 (필터링, 페이징 지원).
+
+**Query Parameters:**
+- `notified`: bool - 알림 전송 여부 필터 (optional)
+- `stock_code`: str - 종목코드 필터 (optional)
+- `page`: int - 페이지 번호 (default: 1)
+- `page_size`: int - 페이지 크기 (default: 20)
+
+**응답 200:**
+```json
+{
+  "items": [
+    {
+      "id": 1247,
+      "title": "삼성전자, 3나노 공정 양산 돌입",
+      "content": "...",
+      "stock_code": "005930",
+      "published_at": "2025-11-02T09:00:00+09:00",
+      "notified_at": "2025-11-02T09:05:12+09:00",
+      "prediction": {
+        "direction": "up",
+        "confidence": 0.87,
+        "reasoning": "..."
+      }
+    }
+  ],
+  "total": 1247,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+#### GET /api/stocks/summary
+
+HOT 종목 요약을 조회합니다 (뉴스 수, 알림 수 기준).
+
+**응답 200:**
+```json
+{
+  "hot_stocks": [
+    {
+      "stock_code": "005930",
+      "stock_name": "삼성전자",
+      "news_count": 127,
+      "notification_count": 45,
+      "avg_confidence": 0.82,
+      "latest_direction": "up"
+    }
+  ]
+}
+```
+
+#### GET /api/stocks/{stock_code}/analysis
+
+종목별 AI 투자 분석 리포트를 조회합니다 (StockAnalysisSummary 캐시).
+
+**Path Parameters:**
+- `stock_code`: str - 종목코드 (예: "005930")
+
+**응답 200:**
+```json
+{
+  "stock_code": "005930",
+  "overall_summary": "삼성전자는 최근 3나노 공정 양산 발표로...",
+  "short_term_scenario": "단기적으로 5% 상승 가능성...",
+  "medium_term_scenario": "중기적으로는...",
+  "long_term_scenario": "장기적으로는...",
+  "risk_factors": ["반도체 업황 둔화 가능성", "환율 변동성"],
+  "opportunity_factors": ["AI 반도체 수요 증가", "삼성 파운드리 수주 확대"],
+  "recommendation": "매수 의견 (목표가: 85,000원)",
+  "statistics": {
+    "total_predictions": 127,
+    "up_count": 87,
+    "down_count": 25,
+    "hold_count": 15,
+    "avg_confidence": 0.82
+  },
+  "last_updated": "2025-11-02T08:00:00+09:00"
+}
+```
+
+**응답 404:**
+```json
+{
+  "detail": "Analysis not found for stock code 005930"
+}
+```
+
+#### GET /api/predictions
+
+예측 이력을 조회합니다 (필터링, 페이징 지원).
+
+**Query Parameters:**
+- `stock_code`: str - 종목코드 필터 (optional)
+- `direction`: str - 방향 필터 ("up", "down", "hold") (optional)
+- `min_confidence`: float - 최소 신뢰도 필터 (0.0~1.0) (optional)
+- `page`: int - 페이지 번호 (default: 1)
+- `page_size`: int - 페이지 크기 (default: 20)
+
+**응답 200:**
+```json
+{
+  "items": [
+    {
+      "id": 1250,
+      "news_id": 1247,
+      "stock_code": "005930",
+      "direction": "up",
+      "confidence": 0.87,
+      "reasoning": "3나노 공정 양산 발표로 기술 경쟁력 강화...",
+      "short_term": "T+1일 예측: +3.2%",
+      "medium_term": "T+3일 예측: +5.8%",
+      "long_term": "T+5일 예측: +7.1%",
+      "created_at": "2025-11-02T09:05:00+09:00"
+    }
+  ],
+  "total": 1247,
+  "page": 1,
+  "page_size": 20
 }
 ```
 
@@ -830,55 +1147,101 @@ craveny/
 ├── .github/workflows/          # CI/CD
 │   ├── ci.yml
 │   └── deploy.yml
+├── frontend/                   # Next.js 웹 대시보드
+│   ├── app/                    # App Router
+│   │   ├── page.tsx            # 사용자 대시보드 (/)
+│   │   ├── layout.tsx          # Root Layout
+│   │   ├── globals.css
+│   │   ├── admin/
+│   │   │   └── dashboard/page.tsx  # 관리자 대시보드 (/admin/dashboard)
+│   │   ├── stocks/
+│   │   │   ├── page.tsx        # 종목 목록 (/stocks)
+│   │   │   └── [stockCode]/page.tsx  # 종목 상세 (/stocks/:code)
+│   │   ├── predictions/page.tsx    # 예측 이력 (/predictions)
+│   │   └── components/
+│   │       └── Navigation.tsx  # 네비게이션
+│   ├── public/
+│   ├── next.config.ts          # API 프록시 설정
+│   ├── tailwind.config.ts
+│   ├── package.json
+│   └── tsconfig.json
 ├── backend/                    # FastAPI 애플리케이션
-│   ├── main.py                 # 진입점
+│   ├── main.py                 # 진입점 (FastAPI 앱 초기화)
 │   ├── config.py               # 환경 변수
+│   ├── api/                    # REST API 라우터
+│   │   ├── __init__.py
+│   │   ├── dashboard.py        # GET /api/dashboard/stats
+│   │   ├── news.py             # GET /api/news
+│   │   ├── stocks.py           # GET /api/stocks/*
+│   │   ├── prediction.py       # GET /api/predictions
+│   │   └── statistics.py       # GET /api/statistics/summary
 │   ├── crawlers/               # 데이터 수집
+│   │   ├── base_crawler.py
 │   │   ├── news_crawler.py
 │   │   ├── stock_crawler.py
+│   │   ├── news_saver.py
 │   │   └── news_stock_matcher.py
-│   ├── llm/                    # AI/ML
+│   ├── llm/                    # AI/ML & 예측
 │   │   ├── embedder.py
-│   │   ├── similarity_search.py
-│   │   ├── predictor.py
-│   │   ├── time_classifier.py
+│   │   ├── vector_search.py    # Milvus 유사도 검색
+│   │   ├── predictor.py        # LLM 예측 생성 (GPT-4o)
+│   │   ├── prediction_cache.py # Redis 캐싱
+│   │   ├── investment_report.py # 투자 리포트 생성
 │   │   └── prompts/
-│   ├── telegram/               # 텔레그램 봇
-│   │   ├── bot.py
-│   │   ├── message_builder.py
-│   │   ├── notification_filter.py
-│   │   └── templates/
+│   ├── notifications/          # 알림 시스템
+│   │   ├── __init__.py
+│   │   ├── telegram.py         # 텔레그램 메시지 전송
+│   │   └── auto_notify.py      # 자동 알림 로직
+│   ├── services/               # 비즈니스 로직
+│   │   └── stock_analysis_service.py
 │   ├── db/                     # 데이터베이스
-│   │   ├── models.py
-│   │   ├── database.py
+│   │   ├── base.py
+│   │   ├── session.py
+│   │   ├── models/             # SQLAlchemy 모델
+│   │   │   ├── __init__.py
+│   │   │   ├── news.py
+│   │   │   ├── stock_price.py
+│   │   │   ├── prediction.py
+│   │   │   └── stock_analysis.py
 │   │   ├── milvus_client.py
 │   │   └── repositories/
 │   ├── scheduler/              # 스케줄링
-│   │   ├── apscheduler_jobs.py
+│   │   ├── crawler_scheduler.py  # APScheduler (10분 주기 크롤링)
 │   │   ├── celery_app.py
 │   │   └── celery_tasks.py
-│   ├── api/                    # REST API
-│   │   ├── health.py
-│   │   └── metrics.py
+│   ├── scripts/                # 유틸리티 스크립트
+│   │   ├── fix_naver_news.py
+│   │   ├── check_status.py
+│   │   └── start_crawler.py
 │   └── utils/
+│       ├── stock_mapping.py
+│       └── encoding_normalizer.py
 ├── data/                       # 데이터 및 로그
-├── scripts/                    # 유틸리티
+├── scripts/                    # 프로젝트 레벨 스크립트
 │   ├── init_db.py
 │   ├── init_milvus.py
+│   ├── test_*.py               # 테스트 스크립트들
 │   └── initial_data_collection.py
 ├── tests/                      # 테스트
 │   ├── unit/
 │   ├── integration/
 │   └── e2e/
 ├── docs/                       # 문서
-│   ├── prd.md
-│   └── architecture.md
+│   ├── prd/
+│   │   ├── epic-1-data-infrastructure.md
+│   │   └── epic-2-llm-prediction-notifications.md
+│   ├── stories/
+│   │   ├── 1.*.md              # Epic 1 스토리들
+│   │   └── 2.*.md              # Epic 2 스토리들
+│   ├── architecture.md
+│   └── DASHBOARD_UX_DESIGN.md
 ├── infrastructure/             # 인프라
 │   ├── docker-compose.yml
 │   └── Dockerfile
 ├── .env.example
 ├── requirements.txt
 ├── requirements-dev.txt
+├── RUN_GUIDE.md
 └── README.md
 ```
 
@@ -932,38 +1295,63 @@ mypy backend/ --ignore-missing-imports
 git clone https://github.com/your-org/craveny.git
 cd craveny
 
-# 2. Python 가상환경
+# 2. Python 가상환경 (Backend)
 python3.11 -m venv venv
 source venv/bin/activate
 
-# 3. 의존성 설치
+# 3. Backend 의존성 설치
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
-# 4. 환경 변수
-cp .env.example .env
-# .env 편집
+# 4. Frontend 의존성 설치
+cd frontend
+npm install
+cd ..
 
-# 5. Docker 서비스 실행
+# 5. 환경 변수
+cp .env.example .env
+# .env 편집 (OPENAI_API_KEY, TELEGRAM_BOT_TOKEN 등)
+
+# 6. Docker 서비스 실행
 cd infrastructure
 docker-compose up -d
 
-# 6. DB 초기화
+# 7. DB 초기화
 python scripts/init_db.py
 python scripts/init_milvus.py
 ```
 
 ### 10.2 개발 명령어
 
+**Frontend (Next.js):**
 ```bash
-# FastAPI 서버 (핫 리로드)
+# 개발 서버 (핫 리로드, http://localhost:3000)
+cd frontend
+npm run dev
+
+# 프로덕션 빌드
+npm run build
+
+# 프로덕션 실행
+npm run start
+
+# 린트
+npm run lint
+```
+
+**Backend (FastAPI):**
+```bash
+# FastAPI 서버 (핫 리로드, http://localhost:8000)
 uvicorn backend.main:app --reload
 
 # Celery Worker
 celery -A backend.scheduler.celery_app worker --loglevel=info
 
+# 크롤러 시작 (APScheduler)
+python backend/scripts/start_crawler.py
+
 # 텔레그램 봇
-python -m backend.telegram.bot
+python -m backend.notifications.telegram
 
 # 테스트
 pytest tests/
