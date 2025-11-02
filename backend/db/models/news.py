@@ -18,6 +18,7 @@ class NewsArticle(Base):
         source: 뉴스 출처 (예: 'naver', 'hankyung', 'maeil')
         stock_code: 관련 종목 코드 (예: '005930')
         created_at: 데이터 생성 시간
+        notified_at: 텔레그램 알림 전송 시간 (None이면 미전송)
     """
 
     __tablename__ = "news_articles"
@@ -29,6 +30,7 @@ class NewsArticle(Base):
     source = Column(String(100), nullable=False)
     stock_code = Column(String(10), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    notified_at = Column(DateTime, nullable=True)
 
     # 복합 인덱스: stock_code와 published_at으로 빠른 조회
     __table_args__ = (

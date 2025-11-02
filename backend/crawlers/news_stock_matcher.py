@@ -82,19 +82,19 @@ def get_price_changes_for_news(
     news: NewsArticle, db: Session
 ) -> Dict[str, Optional[float]]:
     """
-    뉴스 발표 후 1일/3일/5일 주가 변동률을 계산합니다.
+    뉴스 발표 후 1일/2일/3일/5일/10일/20일 주가 변동률을 계산합니다.
 
     Args:
         news: 뉴스 기사 객체
         db: 데이터베이스 세션
 
     Returns:
-        변동률 딕셔너리 {'1d': ..., '3d': ..., '5d': ...}
+        변동률 딕셔너리 {'1d': ..., '2d': ..., '3d': ..., '5d': ..., '10d': ..., '20d': ...}
         데이터가 없으면 None
     """
     if not news.stock_code:
         logger.warning(f"뉴스 ID {news.id}에 종목 코드가 없습니다")
-        return {"1d": None, "3d": None, "5d": None}
+        return {"1d": None, "2d": None, "3d": None, "5d": None, "10d": None, "20d": None}
 
     # T0 시점 주가 (뉴스 발표일)
     t0_date = news.published_at.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -105,17 +105,17 @@ def get_price_changes_for_news(
             f"뉴스 ID {news.id}, 종목 {news.stock_code}의 "
             f"T0 주가({t0_date.strftime('%Y-%m-%d')})를 찾을 수 없습니다"
         )
-        return {"1d": None, "3d": None, "5d": None}
+        return {"1d": None, "2d": None, "3d": None, "5d": None, "10d": None, "20d": None}
 
     logger.debug(
         f"뉴스 ID {news.id}, 종목 {news.stock_code}, "
         f"T0 주가({t0_date.strftime('%Y-%m-%d')}): {t0_price:,.0f}원"
     )
 
-    # T+1, T+3, T+5일 주가 조회
+    # T+1, T+2, T+3, T+5, T+10, T+20일 주가 조회
     results = {}
 
-    for days, key in [(1, "1d"), (3, "3d"), (5, "5d")]:
+    for days, key in [(1, "1d"), (2, "2d"), (3, "3d"), (5, "5d"), (10, "10d"), (20, "20d")]:
         tn_date = add_business_days(t0_date, days=days)
         tn_price = get_stock_price_at_date(news.stock_code, tn_date, db)
 
@@ -145,7 +145,7 @@ def create_news_stock_match(
     Args:
         news_id: 뉴스 ID
         stock_code: 종목 코드
-        price_changes: 변동률 딕셔너리 {'1d': ..., '3d': ..., '5d': ...}
+        price_changes: 변동률 딕셔너리 {'1d': ..., '2d': ..., '3d': ..., '5d': ..., '10d': ..., '20d': ...}
         db: 데이터베이스 세션
 
     Returns:
@@ -165,8 +165,11 @@ def create_news_stock_match(
         if existing:
             # 기존 레코드 업데이트
             existing.price_change_1d = price_changes.get("1d")
+            existing.price_change_2d = price_changes.get("2d")
             existing.price_change_3d = price_changes.get("3d")
             existing.price_change_5d = price_changes.get("5d")
+            existing.price_change_10d = price_changes.get("10d")
+            existing.price_change_20d = price_changes.get("20d")
             existing.calculated_at = datetime.utcnow()
             logger.debug(f"기존 매칭 레코드 업데이트: 뉴스 ID {news_id}, 종목 {stock_code}")
             match = existing
@@ -176,8 +179,11 @@ def create_news_stock_match(
                 news_id=news_id,
                 stock_code=stock_code,
                 price_change_1d=price_changes.get("1d"),
+                price_change_2d=price_changes.get("2d"),
                 price_change_3d=price_changes.get("3d"),
                 price_change_5d=price_changes.get("5d"),
+                price_change_10d=price_changes.get("10d"),
+                price_change_20d=price_changes.get("20d"),
                 calculated_at=datetime.utcnow(),
             )
             db.add(match)

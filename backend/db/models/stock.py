@@ -1,8 +1,40 @@
 """
-StockPrice model for storing daily stock price data.
+Stock models for storing stock master data and daily stock price data.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Index
+from datetime import datetime
 from backend.db.base import Base
+
+
+class Stock(Base):
+    """
+    종목 마스터 테이블.
+
+    Attributes:
+        id: Primary key
+        code: 종목 코드 (예: '005930')
+        name: 종목명 (예: '삼성전자')
+        priority: 크롤링 우선순위 (1~5, 낮을수록 우선)
+        is_active: 활성화 여부
+        created_at: 생성일시
+        updated_at: 수정일시
+    """
+
+    __tablename__ = "stocks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), unique=True, nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    priority = Column(Integer, default=5, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<Stock(id={self.id}, code='{self.code}', name='{self.name}', "
+            f"priority={self.priority}, is_active={self.is_active})>"
+        )
 
 
 class StockPrice(Base):

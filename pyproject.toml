@@ -98,6 +98,10 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
 
+[project.scripts]
+craveny = "backend.main:main"
+dev = "backend.main:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["backend*"]

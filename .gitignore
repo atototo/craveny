@@ -83,3 +83,9 @@ Thumbs.db
 
 # Milvus
 milvus_data/
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/

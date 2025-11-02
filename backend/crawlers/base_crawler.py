@@ -133,8 +133,32 @@ class BaseNewsCrawler(ABC):
             logger.info(f"Fetching: {url}")
             response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
-            response.encoding = "utf-8"  # 한글 인코딩 설정
-            return response.text
+
+            # 한글 인코딩 처리
+            # 1. Content-Type 헤더에서 명시된 인코딩 확인
+            if response.encoding and response.encoding != 'ISO-8859-1':
+                return response.text
+
+            # 2. HTML 메타 태그에서 charset 확인
+            content = response.content
+
+            # UTF-8로 시도
+            try:
+                return content.decode('utf-8')
+            except UnicodeDecodeError:
+                pass
+
+            # charset 감지
+            try:
+                detected_encoding = response.apparent_encoding or 'utf-8'
+                return content.decode(detected_encoding)
+            except (UnicodeDecodeError, LookupError):
+                # 마지막 시도: EUC-KR (한국어 사이트용)
+                try:
+                    return content.decode('euc-kr')
+                except UnicodeDecodeError:
+                    logger.warning(f"인코딩 변환 실패: {url}, UTF-8로 무시하고 진행")
+                    return content.decode('utf-8', errors='ignore')
 
         except requests.exceptions.Timeout:
             logger.error(f"Timeout error for {url}")

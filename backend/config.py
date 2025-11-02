@@ -46,6 +46,10 @@ class Settings(BaseSettings):
 
     # 텔레그램
     TELEGRAM_BOT_TOKEN: str
+    TELEGRAM_CHAT_ID: str
+
+    # DART (금융감독원 공시)
+    DART_API_KEY: str = ""  # 선택사항
 
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]

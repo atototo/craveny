@@ -10,15 +10,18 @@ from backend.db.base import Base
 class NewsStockMatch(Base):
     """
     뉴스-주가 매칭 모델.
-    뉴스 발표 후 1일, 3일, 5일 간의 주가 변동률을 저장.
+    뉴스 발표 후 1일, 2일, 3일, 5일, 10일, 20일 간의 주가 변동률을 저장.
 
     Attributes:
         id: Primary key
         news_id: 뉴스 기사 ID (Foreign Key)
         stock_code: 종목 코드
         price_change_1d: 1일 후 가격 변동률 (%)
+        price_change_2d: 2일 후 가격 변동률 (%)
         price_change_3d: 3일 후 가격 변동률 (%)
         price_change_5d: 5일 후 가격 변동률 (%)
+        price_change_10d: 10일 후 가격 변동률 (%)
+        price_change_20d: 20일 후 가격 변동률 (%)
         calculated_at: 계산 시간
     """
 
@@ -28,8 +31,11 @@ class NewsStockMatch(Base):
     news_id = Column(Integer, ForeignKey("news_articles.id"), nullable=False)
     stock_code = Column(String(10), nullable=False)
     price_change_1d = Column(Float, nullable=True)
+    price_change_2d = Column(Float, nullable=True)
     price_change_3d = Column(Float, nullable=True)
     price_change_5d = Column(Float, nullable=True)
+    price_change_10d = Column(Float, nullable=True)
+    price_change_20d = Column(Float, nullable=True)
     calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationship

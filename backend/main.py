@@ -34,8 +34,13 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from backend.api import health
+from backend.api import health, prediction, dashboard, news, stocks, stock_management
 app.include_router(health.router, tags=["Health"])
+app.include_router(prediction.router, tags=["Prediction"])
+app.include_router(dashboard.router, tags=["Dashboard"])
+app.include_router(news.router, tags=["News"])
+app.include_router(stocks.router, tags=["Stocks"])
+app.include_router(stock_management.router, tags=["Stock Management"])
 
 
 @app.on_event("startup")
@@ -70,3 +75,20 @@ async def root():
         "health": "/health",
         "stats": "/stats",
     }
+
+
+def main():
+    """메인 진입점 - uvicorn으로 서버 실행"""
+    import uvicorn
+
+    uvicorn.run(
+        "backend.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.DEBUG,
+        log_level=settings.LOG_LEVEL.lower(),
+    )
+
+
+if __name__ == "__main__":
+    main()
