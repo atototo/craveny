@@ -67,7 +67,7 @@ Craveny는 **Full-Stack Monolith 아키텍처**로 구성됩니다. Next.js 웹 
 **핵심 구성:**
 - **프론트엔드:** Next.js 15 (App Router) - 사용자/관리자 대시보드, 종목 분석 페이지
 - **백엔드:** Python 3.11+ FastAPI - RESTful API, 비동기 작업 처리, LLM 예측
-- **데이터 파이프라인:** APScheduler (주기적 크롤링), Celery (비동기 LLM 분석)
+- **데이터 파이프라인:** APScheduler (주기적 크롤링, 자동 알림)
 - **알림 채널:** 텔레그램 봇 (python-telegram-bot), 웹 대시보드 (실시간 업데이트)
 - **AI/ML:** OpenAI GPT-4o (예측 생성), text-embedding-3-small (768차원 벡터)
 - **데이터 저장:** PostgreSQL (관계형 데이터), Milvus (벡터 검색), Redis (캐싱/큐)
@@ -139,8 +139,8 @@ graph TB
         subgraph "FastAPI 애플리케이션"
             API[FastAPI Server<br/>포트 8000<br/>REST API]
             CRAWLER[크롤러<br/>APScheduler]
-            CELERY[Celery Worker<br/>비동기 LLM 분석]
-            BOT[텔레그램 봇<br/>python-telegram-bot]
+            AUTO_NOTIFY[자동 알림<br/>APScheduler]
+            BOT[텔레그램 알림<br/>python-telegram-bot]
         end
 
         subgraph "데이터 레이어"
@@ -175,14 +175,13 @@ graph TB
     API -->|벡터 검색| MILVUS
     API -->|캐싱| REDIS
 
-    CELERY -->|새 뉴스 감지| PG
-    CELERY -->|임베딩| OPENAI
-    CELERY -->|벡터 저장| MILVUS
-    CELERY -->|유사도 검색| MILVUS
-    CELERY -->|LLM 예측| OPENAI
-    CELERY -->|예측 저장| PG
-    CELERY -->|알림 트리거| BOT
-    CELERY -->|작업 큐| REDIS
+    AUTO_NOTIFY -->|새 뉴스 감지| PG
+    AUTO_NOTIFY -->|유사도 검색| MILVUS
+    AUTO_NOTIFY -->|임베딩| OPENAI
+    AUTO_NOTIFY -->|LLM 예측| OPENAI
+    AUTO_NOTIFY -->|예측 캐싱| REDIS
+    AUTO_NOTIFY -->|예측 저장| PG
+    AUTO_NOTIFY -->|알림 트리거| BOT
 
     MILVUS -->|의존성| ETCD
     MILVUS -->|스토리지| MINIO
@@ -203,7 +202,7 @@ graph TB
 
 - **Monolith Architecture:** 단일 FastAPI 애플리케이션 - _근거: 2주 MVP, <100 사용자 규모에 최적, 빠른 개발 및 배포_
 
-- **Background Job Processing (Celery):** 비동기 작업 큐 패턴 - _근거: 뉴스 크롤링, LLM 분석, 알림 전송을 메인 요청 흐름과 분리하여 성능 최적화_
+- **Scheduled Background Processing (APScheduler):** 주기적 백그라운드 작업 - _근거: 뉴스 크롤링, 자동 알림을 정해진 주기로 실행하여 최신 데이터 유지 및 알림 전송_
 
 - **RAG (Retrieval-Augmented Generation):** 벡터 검색 + LLM 생성 - _근거: 과거 유사 뉴스 패턴을 활용하여 예측 정확도 향상, LLM 환각(hallucination) 감소_
 
@@ -233,13 +232,12 @@ graph TB
 | **백엔드 프레임워크** | FastAPI | 0.104+ | RESTful API, 비동기 처리, 헬스체크 엔드포인트 | 비동기 우수, 자동 문서화, 타입 힌트 지원, 빠른 개발 속도 |
 | **API 스타일** | REST | - | 헬스체크/메트릭 조회 API | 단순 CRUD 충분, 텔레그램 봇이 주 인터페이스 |
 | **스케줄러** | APScheduler | 3.10+ | 주기적 크롤링 (뉴스 10분, 주가 1분) | 간단한 스케줄링에 충분, FastAPI 통합 용이 |
-| **비동기 작업 큐** | Celery | 5.3+ | LLM 예측, 임베딩, 알림 전송 비동기 처리 | 표준 Python 비동기 작업, 재시도/모니터링 기능 |
-| **메시지 브로커/캐시** | Redis | 7.0+ | Celery 메시지 브로커, 중복 방지 캐시 | 빠른 인메모리 저장소, Celery 표준 백엔드 |
+| **캐시** | Redis | 7.0+ | LLM 예측 결과 캐싱 (24시간 TTL) | 빠른 인메모리 저장소, 중복 예측 방지, 비용 절감 |
 | **관계형 데이터베이스** | PostgreSQL | 13+ | 뉴스, 주가, 매칭 결과, 사용자 데이터 | 안정적, ACID 보장, 한국어 지원, JSON 컬럼 지원 |
 | **벡터 데이터베이스** | Milvus | 2.3+ | 뉴스 임베딩 저장 및 유사도 검색 | 무료, 무제한, 데이터 주권, L2/IP 거리 지원 |
 | **벡터 DB 의존성** | etcd | 3.5+ | Milvus 메타데이터 저장 | Milvus 필수 의존성 |
 | **벡터 DB 스토리지** | MinIO | Latest | Milvus 데이터 영구 저장 | Milvus 필수 의존성, S3 호환 |
-| **LLM** | OpenAI GPT-4o-mini | Latest API | 뉴스 영향도 예측, 전략 메시지 생성 | 비용 대비 성능 우수 ($0.01~0.02/건), 안정적 API, 한국어 지원 |
+| **LLM** | OpenAI GPT-4o | Latest API | 뉴스 영향도 예측, 전략 메시지 생성 | 고성능 분석 ($0.02~0.05/건), 안정적 API, 한국어 지원, JSON mode |
 | **임베딩 모델** | OpenAI text-embedding-3-small | Latest API | 뉴스 텍스트 → 768차원 벡터 변환 | 비용 효율적 ($0.0001/건), 한국어 성능 우수, Milvus 호환 |
 | **크롤링 라이브러리** | BeautifulSoup4 | 4.12+ | HTML 파싱, 뉴스 크롤링 | 간단하고 충분, 학습 곡선 낮음 |
 | **주가 데이터** | FinanceDataReader | 0.9+ | 한국 증시 주가 수집 | 한국 시장 특화, 무료, KRX 데이터 지원 |
@@ -720,7 +718,7 @@ Craveny는 **Next.js 웹 대시보드와 텔레그램 봇 이중 인터페이스
   "telegram_notifications_sent_24h": 37,
   "average_prediction_time": 3.24,
   "total_active_users": 18,
-  "celery_queue_size": 2,
+  "redis_cache_hits": 142,
   "openai_api_cost_today": 1.47
 }
 ```
@@ -887,15 +885,29 @@ HOT 종목 요약을 조회합니다 (뉴스 수, 알림 수 기준).
 
 ### 6.1 News Crawler (뉴스 크롤러)
 
-**책임:** 네이버 뉴스, 한국경제, 매일경제에서 증권 뉴스 자동 크롤링
+**책임:** 다중 언론사에서 증권 뉴스 자동 크롤링 (네이버, 네이버 검색, 한국경제, 매일경제, 전자공시 DART)
 
-**주요 인터페이스:**
-- `crawl_news(source: str) -> List[News]`
-- `extract_stock_code(title: str, content: str) -> str | None`
-- `is_duplicate(news: News) -> bool`
-- `save_news(news: News) -> int`
+**주요 크롤러:**
+- `NaverNewsCrawler`: 네이버 증권 뉴스 크롤링
+- `NaverNewsSearchCrawler`: 네이버 검색 API 기반 뉴스 크롤링
+- `HankyungNewsCrawler`: 한국경제 증권 뉴스 크롤링
+- `MaeilNewsCrawler`: 매일경제 증권 뉴스 크롤링
+- `DartCrawler`: 전자공시 DART 공시 정보 크롤링
 
-**기술 상세:** `backend/crawlers/news_crawler.py`, APScheduler 10분 주기
+**공통 인터페이스 (BaseNewsCrawler):**
+- `crawl(max_items: int) -> List[NewsArticleData]`: 뉴스 크롤링 실행
+- `_fetch_page(url: str) -> str`: 페이지 HTML 다운로드 (retry 로직 포함)
+- `_rate_limit()`: Rate limiting 적용 (기본 1초)
+
+**뉴스 저장 (NewsSaver):**
+- `save_articles(articles: List[NewsArticleData]) -> dict`: 뉴스 DB 저장 및 중복 체크
+- `_match_stock_code(company_name: str) -> str | None`: 기업명 → 종목코드 매칭
+
+**기술 상세:**
+- 경로: `backend/crawlers/`
+- 스케줄링: `CrawlerScheduler` (APScheduler, 10분 주기)
+- 중복 방지: 제목 기반 중복 체크
+- 재시도: HTTP 요청 실패 시 최대 3회 재시도
 
 ### 6.2 Stock Price Collector (주가 수집기)
 
@@ -921,46 +933,135 @@ HOT 종목 요약을 조회합니다 (뉴스 수, 알림 수 기준).
 
 ### 6.4 RAG Search Service (벡터 유사도 검색)
 
-**책임:** 새 뉴스의 유사 과거 뉴스 TOP 5 검색 (<100ms)
+**책임:** 새 뉴스의 유사 과거 뉴스 검색 및 주가 변동률 정보 제공 (<100ms)
 
-**주요 인터페이스:**
-- `search_similar_news(news_text: str, top_k: int = 5) -> List[News]`
-- `embed_query(text: str) -> List[float]`
-- `fetch_news_details(news_ids: List[int]) -> List[News]`
+**주요 클래스: `VectorSearch`**
 
-**기술 상세:** `backend/llm/similarity_search.py`, Milvus L2 거리
+**핵심 메서드:**
+- `get_news_with_price_changes(news_text: str, stock_code: str, top_k: int = 5) -> List[dict]`: 유사 뉴스 + 주가 변동률 조회
+- `_embed_text(text: str) -> List[float]`: OpenAI API로 텍스트 임베딩 생성 (768차원)
+- `_search_milvus(embedding: List[float], top_k: int) -> List[int]`: Milvus 벡터 검색 (L2 거리)
+
+**반환 데이터 구조:**
+```python
+{
+    "news_id": int,
+    "title": str,
+    "similarity": float,  # 0.0 ~ 1.0
+    "price_change_1d": float,  # 1일 후 변동률 (%)
+    "price_change_3d": float,  # 3일 후 변동률 (%)
+    "price_change_5d": float,  # 5일 후 변동률 (%)
+}
+```
+
+**기술 상세:**
+- 경로: `backend/llm/vector_search.py`
+- 임베딩 모델: OpenAI text-embedding-3-small (768차원)
+- 벡터 DB: Milvus (L2 distance)
+- 유사도 임계값: 0.5 (기본값)
 
 ### 6.5 LLM Prediction Engine (예측 엔진)
 
-**책임:** 현재 뉴스 + 유사 과거 뉴스 + 현재 주가 → LLM 종합 분석 (2~5초)
+**책임:** 뉴스 + 유사 과거 뉴스 + 현재 주가 → LLM 종합 분석 및 예측 생성 (2~5초)
 
-**주요 인터페이스:**
-- `predict(news: News, similar_news: List[News], current_price: float) -> Prediction`
-- `build_prompt(news: News, similar_news: List[News]) -> str`
-- `parse_llm_response(response: str) -> Prediction`
+**주요 클래스: `StockPredictor`**
 
-**기술 상세:** `backend/llm/predictor.py`, GPT-4o-mini API
+**핵심 메서드:**
+- `predict_from_news(news_id: int, similar_news: List[dict]) -> dict`: 뉴스 기반 예측 생성
+- `_get_current_stock_info(stock_code: str) -> dict`: 현재 주가 정보 조회
+- `_build_llm_prompt(current_news: dict, similar_news: List[dict], stock_info: dict) -> str`: LLM 프롬프트 생성
+- `_call_llm(prompt: str) -> dict`: OpenAI GPT-4o API 호출 및 JSON 파싱
+
+**예측 결과 구조:**
+```python
+{
+    "direction": str,  # "up", "down", "hold"
+    "confidence": float,  # 0.0 ~ 1.0
+    "reasoning": str,  # 예측 근거 (LLM 생성)
+    "short_term": str,  # T+1일 예측
+    "medium_term": str,  # T+3일 예측
+    "long_term": str,  # T+5일 예측
+}
+```
+
+**캐싱 전략 (PredictionCache):**
+- Redis 기반 예측 결과 캐싱 (동일 뉴스 재요청 방지)
+- TTL: 24시간
+- 키 형식: `prediction:{news_id}`
+
+**기술 상세:**
+- 경로: `backend/llm/predictor.py`, `backend/llm/prediction_cache.py`
+- LLM 모델: GPT-4o (gpt-4o)
+- 응답 형식: JSON mode
+- 비용 최적화: Redis 캐싱으로 중복 호출 방지
 
 ### 6.6 Telegram Bot (텔레그램 봇)
 
-**책임:** 사용자 명령어 처리 및 알림 메시지 전송
+**책임:** 주가 예측 결과를 텔레그램으로 알림 전송
 
-**주요 인터페이스:**
-- `send_notification(user_id: int, message: str) -> bool`
-- `handle_start(user_id: int) -> None`
-- `handle_stop(user_id: int) -> None`
+**구현 클래스:** `TelegramNotifier` (`backend/notifications/telegram.py`)
 
-**기술 상세:** `backend/telegram/bot.py`, python-telegram-bot
+**주요 메서드:**
+```python
+class TelegramNotifier:
+    def send_message(message: str, parse_mode: str = "Markdown") -> bool
+    def send_prediction(news_title: str, stock_code: str, prediction: Dict) -> bool
+    def test_connection() -> bool
+    def _format_prediction_message(...) -> str  # 메시지 포맷팅
+    def _get_current_stock_info(stock_code: str) -> Optional[Dict]  # 현재 주가 조회
+```
 
-### 6.7 Celery Task Orchestrator (비동기 작업 오케스트레이터)
+**메시지 포맷 구조:**
+- 📰 뉴스 제목 (최대 100자)
+- 🏢 종목 정보 (종목명, 코드, 현재가, 변동률)
+- 📊 AI 예측 (상승/하락/유지)
+- 📅 기간별 전망 (단기/중기/장기)
+- 💡 예측 근거 (최대 200자)
+- 유사 뉴스 분석 건수 및 모델 정보
 
-**책임:** 새 뉴스 감지 → 예측 파이프라인 트리거 (순차 실행)
+**기술 상세:**
+- Telegram Bot API (httpx 라이브러리 사용)
+- Markdown 파싱 모드
+- Timeout 10초
+- 싱글톤 패턴 (`get_telegram_notifier()`)
 
-**주요 인터페이스:**
-- `@celery.task process_new_news(news_id: int) -> None`
-- `@celery.task retry_failed_task(task_id: str) -> None`
+### 6.7 Auto Notification System (자동 알림 시스템)
 
-**기술 상세:** `backend/scheduler/celery_tasks.py`, Redis 브로커
+**책임:** 최근 뉴스를 자동으로 처리하여 예측 및 알림 전송
+
+**구현 함수:** `process_new_news_notifications()` (`backend/notifications/auto_notify.py`)
+
+**처리 프로세스:**
+```python
+def process_new_news_notifications(db: Session, lookback_minutes: int = 15) -> dict:
+    # 1. 최근 N분 이내 저장된 뉴스 조회 (종목 코드 있고, 아직 알림 안 보낸 것)
+    # 2. 최대 10건 처리
+    # 3. 각 뉴스별로:
+    #    - VectorSearch로 유사 뉴스 검색 (TOP 5, 유사도 ≥0.5)
+    #    - StockPredictor로 예측 수행 (캐시 사용)
+    #    - TelegramNotifier로 알림 전송
+    #    - 성공 시 notified_at 업데이트
+    # 4. 통계 반환: {processed, success, failed}
+```
+
+**필터링 조건:**
+- `created_at >= cutoff_time` (최근 15분)
+- `stock_code IS NOT NULL`
+- `notified_at IS NULL` (중복 방지)
+
+**실행 방식:**
+- APScheduler 스케줄러에서 주기적 호출 (예: 10분마다)
+- 동기 방식 처리 (Celery 미사용)
+- 에러 발생 시 로깅 후 다음 뉴스 처리 계속
+
+**반환 구조:**
+```python
+{
+    "processed": int,  # 처리한 뉴스 수
+    "success": int,    # 알림 전송 성공 수
+    "failed": int      # 실패 수
+}
+```
 
 ### 6.8 컴포넌트 다이어그램
 
@@ -978,22 +1079,18 @@ graph TB
         STOCK_CRON[Stock Collector<br/>1분 주기]
         MATCHER_CRON[News-Stock Matcher<br/>일일 15:40]
         EMBED_CRON[Embedding Service<br/>일일 16:00]
+        AUTO_NOTIFY[Auto Notification<br/>10분 주기]
     end
 
     subgraph "Core Services"
-        RAG[RAG Search Service]
-        PREDICTOR[LLM Prediction Engine]
-        TIME_CLASS[Time Classifier]
-        MSG_BUILDER[Message Builder]
-        FILTER[Notification Filter]
-    end
-
-    subgraph "Async Workers (Celery)"
-        CELERY[Celery Task<br/>Orchestrator]
+        VECTOR_SEARCH[VectorSearch<br/>RAG Search]
+        PREDICTOR[StockPredictor<br/>LLM Engine]
+        TELEGRAM_BOT[TelegramNotifier<br/>Message Sender]
     end
 
     subgraph "User Interface"
-        BOT[Telegram Bot]
+        WEB[Next.js Dashboard]
+        TELEGRAM_CHAT[Telegram Chat]
     end
 
     subgraph "Data Layer"
@@ -1013,23 +1110,24 @@ graph TB
     EMBED_CRON --> OPENAI
     EMBED_CRON --> DB_LAYER
 
-    CELERY --> RAG
-    RAG --> OPENAI
-    RAG --> DB_LAYER
+    AUTO_NOTIFY --> DB_LAYER
+    AUTO_NOTIFY --> VECTOR_SEARCH
+    VECTOR_SEARCH --> MILVUS
+    VECTOR_SEARCH --> OPENAI
 
-    RAG --> PREDICTOR
+    AUTO_NOTIFY --> PREDICTOR
     PREDICTOR --> OPENAI
-    PREDICTOR --> TIME_CLASS
-    PREDICTOR --> MSG_BUILDER
+    PREDICTOR --> REDIS
 
-    MSG_BUILDER --> FILTER
-    FILTER --> BOT
-    BOT --> TELEGRAM_API
+    AUTO_NOTIFY --> TELEGRAM_BOT
+    TELEGRAM_BOT --> TELEGRAM_API
+    TELEGRAM_API --> TELEGRAM_CHAT
 
     DB_LAYER --> PG
     DB_LAYER --> MILVUS
-    FILTER --> REDIS
-    CELERY --> REDIS
+    DB_LAYER --> REDIS
+
+    WEB --> DB_LAYER
 ```
 
 ---
@@ -1206,9 +1304,7 @@ craveny/
 │   │   ├── milvus_client.py
 │   │   └── repositories/
 │   ├── scheduler/              # 스케줄링
-│   │   ├── crawler_scheduler.py  # APScheduler (10분 주기 크롤링)
-│   │   ├── celery_app.py
-│   │   └── celery_tasks.py
+│   │   └── crawler_scheduler.py  # APScheduler (10분 주기 크롤링, 자동 알림)
 │   ├── scripts/                # 유틸리티 스크립트
 │   │   ├── fix_naver_news.py
 │   │   ├── check_status.py
@@ -1257,7 +1353,7 @@ craveny/
 - **에러 처리:** 모든 외부 API 호출 try-except 래핑
 - **로깅:** `print()` 금지, `logger` 사용
 - **타입 힌트:** 모든 함수 시그니처 필수
-- **비동기 함수:** FastAPI는 `async def`, Celery는 동기 함수
+- **비동기 함수:** FastAPI는 `async def` 권장, 스케줄러는 동기 함수
 
 ### 9.2 명명 규칙
 
@@ -1341,17 +1437,14 @@ npm run lint
 
 **Backend (FastAPI):**
 ```bash
-# FastAPI 서버 (핫 리로드, http://localhost:8000)
+# FastAPI 서버 (핫 리로드, http://localhost:8000, 스케줄러 포함)
 uvicorn backend.main:app --reload
 
-# Celery Worker
-celery -A backend.scheduler.celery_app worker --loglevel=info
+# Frontend 개발 서버 (http://localhost:3000)
+cd frontend && npm run dev
 
-# 크롤러 시작 (APScheduler)
+# 크롤러 수동 실행 (필요 시)
 python backend/scripts/start_crawler.py
-
-# 텔레그램 봇
-python -m backend.notifications.telegram
 
 # 테스트
 pytest tests/
@@ -1491,7 +1584,7 @@ async def health_check():
 - 요청 비율 (requests/min)
 - 에러 비율 (%)
 - 응답 시간 (평균/p95)
-- Celery 큐 크기
+- Redis 캐시 적중률 (%)
 
 ---
 
