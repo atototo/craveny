@@ -39,10 +39,22 @@ class Settings(BaseSettings):
         """Celery용 Redis URL"""
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
-    # OpenAI
+    # OpenAI (Backup)
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-4o"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # OpenRouter (Primary LLM)
+    OPENROUTER_API_KEY: str = ""
+    LLM_PROVIDER: str = "openai"  # "openai" or "openrouter"
+    OPENROUTER_MODEL: str = "deepseek/deepseek-v3.2-exp"
+
+    # A/B Testing
+    AB_TEST_ENABLED: bool = False
+    MODEL_A_PROVIDER: str = "openai"
+    MODEL_A_NAME: str = "gpt-4o"
+    MODEL_B_PROVIDER: str = "openrouter"
+    MODEL_B_NAME: str = "deepseek/deepseek-v3.2-exp"
 
     # 텔레그램
     TELEGRAM_BOT_TOKEN: str

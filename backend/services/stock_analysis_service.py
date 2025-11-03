@@ -99,9 +99,15 @@ async def update_stock_analysis_summary(
         # 5. LLM 리포트 생성
         logger.info(f"종목 {stock_code}에 대한 투자 리포트 생성 시작...")
         generator = get_report_generator()
-        report = generator.generate_report(stock_code, predictions, current_price)
 
-        if not report or not report.get("overall_summary"):
+        # A/B 테스트 활성화 시 dual_generate_report 사용
+        from backend.config import settings
+        if settings.AB_TEST_ENABLED:
+            report = generator.dual_generate_report(stock_code, predictions, current_price)
+        else:
+            report = generator.generate_report(stock_code, predictions, current_price)
+
+        if not report or (not settings.AB_TEST_ENABLED and not report.get("overall_summary")):
             logger.error(f"종목 {stock_code}의 리포트 생성 실패")
             return None
 
@@ -114,39 +120,71 @@ async def update_stock_analysis_summary(
         confidences = [p.confidence for p in predictions if p.confidence]
         avg_confidence = sum(confidences) / len(confidences) if confidences else None
 
-        # 7. DB 업데이트 또는 생성
-        if existing_summary:
-            # 업데이트
-            existing_summary.overall_summary = report.get("overall_summary")
-            existing_summary.short_term_scenario = report.get("short_term_scenario")
-            existing_summary.medium_term_scenario = report.get("medium_term_scenario")
-            existing_summary.long_term_scenario = report.get("long_term_scenario")
-            existing_summary.risk_factors = report.get("risk_factors", [])
-            existing_summary.opportunity_factors = report.get("opportunity_factors", [])
-            existing_summary.recommendation = report.get("recommendation")
-
-            existing_summary.total_predictions = total_predictions
-            existing_summary.up_count = up_count
-            existing_summary.down_count = down_count
-            existing_summary.hold_count = hold_count
-            existing_summary.avg_confidence = avg_confidence
-
-            existing_summary.last_updated = datetime.now()
-            existing_summary.based_on_prediction_count = total_predictions
-
-            summary = existing_summary
-            logger.info(f"종목 {stock_code}의 분석 요약 업데이트 완료")
+        # 7. A/B 테스트 활성화 시 전체 report를 JSON으로 저장
+        if settings.AB_TEST_ENABLED:
+            # A/B 리포트 전체를 JSON 필드에 저장 (analysis_summary_a, analysis_summary_b)
+            if existing_summary:
+                # custom_data 필드에 A/B 리포트 저장
+                existing_summary.custom_data = report
+                existing_summary.overall_summary = "A/B 테스트 활성화 (Model A/B 비교 리포트)"
+                existing_summary.total_predictions = total_predictions
+                existing_summary.up_count = up_count
+                existing_summary.down_count = down_count
+                existing_summary.hold_count = hold_count
+                existing_summary.avg_confidence = avg_confidence
+                existing_summary.last_updated = datetime.now()
+                existing_summary.based_on_prediction_count = total_predictions
+                summary = existing_summary
+                logger.info(f"종목 {stock_code}의 A/B 분석 요약 업데이트 완료")
+            else:
+                summary = StockAnalysisSummary(
+                    stock_code=stock_code,
+                    overall_summary="A/B 테스트 활성화 (Model A/B 비교 리포트)",
+                    custom_data=report,
+                    total_predictions=total_predictions,
+                    up_count=up_count,
+                    down_count=down_count,
+                    hold_count=hold_count,
+                    avg_confidence=avg_confidence,
+                    last_updated=datetime.now(),
+                    based_on_prediction_count=total_predictions
+                )
+                db.add(summary)
+                logger.info(f"종목 {stock_code}의 A/B 분석 요약 생성 완료")
         else:
-            # 신규 생성
-            summary = StockAnalysisSummary(
-                stock_code=stock_code,
-                overall_summary=report.get("overall_summary"),
-                short_term_scenario=report.get("short_term_scenario"),
-                medium_term_scenario=report.get("medium_term_scenario"),
-                long_term_scenario=report.get("long_term_scenario"),
-                risk_factors=report.get("risk_factors", []),
-                opportunity_factors=report.get("opportunity_factors", []),
-                recommendation=report.get("recommendation"),
+            # 단일 모델 리포트 저장
+            if existing_summary:
+                # 업데이트
+                existing_summary.overall_summary = report.get("overall_summary")
+                existing_summary.short_term_scenario = report.get("short_term_scenario")
+                existing_summary.medium_term_scenario = report.get("medium_term_scenario")
+                existing_summary.long_term_scenario = report.get("long_term_scenario")
+                existing_summary.risk_factors = report.get("risk_factors", [])
+                existing_summary.opportunity_factors = report.get("opportunity_factors", [])
+                existing_summary.recommendation = report.get("recommendation")
+
+                existing_summary.total_predictions = total_predictions
+                existing_summary.up_count = up_count
+                existing_summary.down_count = down_count
+                existing_summary.hold_count = hold_count
+                existing_summary.avg_confidence = avg_confidence
+
+                existing_summary.last_updated = datetime.now()
+                existing_summary.based_on_prediction_count = total_predictions
+
+                summary = existing_summary
+                logger.info(f"종목 {stock_code}의 분석 요약 업데이트 완료")
+            else:
+                # 신규 생성
+                summary = StockAnalysisSummary(
+                    stock_code=stock_code,
+                    overall_summary=report.get("overall_summary"),
+                    short_term_scenario=report.get("short_term_scenario"),
+                    medium_term_scenario=report.get("medium_term_scenario"),
+                    long_term_scenario=report.get("long_term_scenario"),
+                    risk_factors=report.get("risk_factors", []),
+                    opportunity_factors=report.get("opportunity_factors", []),
+                    recommendation=report.get("recommendation"),
 
                 total_predictions=total_predictions,
                 up_count=up_count,
@@ -195,28 +233,35 @@ def get_stock_analysis_summary(
         if not summary:
             return None
 
-        return {
-            "overall_summary": summary.overall_summary,
-            "short_term_scenario": summary.short_term_scenario,
-            "medium_term_scenario": summary.medium_term_scenario,
-            "long_term_scenario": summary.long_term_scenario,
-            "risk_factors": summary.risk_factors or [],
-            "opportunity_factors": summary.opportunity_factors or [],
-            "recommendation": summary.recommendation,
+        # A/B 테스트 활성화 시 custom_data에서 A/B 리포트 반환
+        from backend.config import settings
+        if settings.AB_TEST_ENABLED and summary.custom_data:
+            # custom_data에 A/B 리포트가 저장되어 있음
+            return summary.custom_data
+        else:
+            # 단일 모델 리포트 반환
+            return {
+                "overall_summary": summary.overall_summary,
+                "short_term_scenario": summary.short_term_scenario,
+                "medium_term_scenario": summary.medium_term_scenario,
+                "long_term_scenario": summary.long_term_scenario,
+                "risk_factors": summary.risk_factors or [],
+                "opportunity_factors": summary.opportunity_factors or [],
+                "recommendation": summary.recommendation,
 
-            "statistics": {
-                "total_predictions": summary.total_predictions,
-                "up_count": summary.up_count,
-                "down_count": summary.down_count,
-                "hold_count": summary.hold_count,
-                "avg_confidence": round(summary.avg_confidence * 100, 1) if summary.avg_confidence else None,
-            },
+                "statistics": {
+                    "total_predictions": summary.total_predictions,
+                    "up_count": summary.up_count,
+                    "down_count": summary.down_count,
+                    "hold_count": summary.hold_count,
+                    "avg_confidence": round(summary.avg_confidence * 100, 1) if summary.avg_confidence else None,
+                },
 
-            "meta": {
-                "last_updated": summary.last_updated.isoformat() if summary.last_updated else None,
-                "based_on_prediction_count": summary.based_on_prediction_count,
+                "meta": {
+                    "last_updated": summary.last_updated.isoformat() if summary.last_updated else None,
+                    "based_on_prediction_count": summary.based_on_prediction_count,
+                }
             }
-        }
 
     except Exception as e:
         logger.error(f"종목 {stock_code}의 분석 요약 조회 실패: {e}", exc_info=True)

@@ -56,6 +56,9 @@ class StockAnalysisSummary(Base):
     hold_count = Column(Integer, default=0)
     avg_confidence = Column(Float, nullable=True)
 
+    # A/B 테스트용 전체 리포트 JSON 저장
+    custom_data = Column(JSON, nullable=True)
+
     # 메타 정보
     last_updated = Column(DateTime, default=datetime.now, nullable=False)
     based_on_prediction_count = Column(Integer, default=0)

@@ -26,9 +26,45 @@ class StockPredictor:
 
     def __init__(self):
         """예측 모델 초기화"""
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = "gpt-4o"  # GPT-4 Omni 모델 사용
+        if settings.LLM_PROVIDER == "openrouter":
+            self.client = OpenAI(
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://craveny.ai",
+                    "X-Title": "Craveny Stock Predictor",
+                }
+            )
+            self.model = settings.OPENROUTER_MODEL
+            logger.info(f"OpenRouter 모델 사용: {self.model}")
+        else:
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            self.model = settings.OPENAI_MODEL
+            logger.info(f"OpenAI 모델 사용: {self.model}")
+
         self.cache = get_prediction_cache()
+
+        # A/B 테스트를 위한 추가 클라이언트
+        if settings.AB_TEST_ENABLED:
+            self.client_a = self._create_client(settings.MODEL_A_PROVIDER)
+            self.model_a = settings.MODEL_A_NAME
+            self.client_b = self._create_client(settings.MODEL_B_PROVIDER)
+            self.model_b = settings.MODEL_B_NAME
+            logger.info(f"A/B 테스트 활성화: Model A={self.model_a}, Model B={self.model_b}")
+
+    def _create_client(self, provider: str) -> OpenAI:
+        """프로바이더별 OpenAI 클라이언트 생성"""
+        if provider == "openrouter":
+            return OpenAI(
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://craveny.ai",
+                    "X-Title": "Craveny Stock Predictor",
+                }
+            )
+        else:  # openai
+            return OpenAI(api_key=settings.OPENAI_API_KEY)
 
     def _get_stock_info(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """
@@ -493,23 +529,47 @@ class StockPredictor:
 
             logger.info(f"주가 예측 시작: {current_news.get('title', 'N/A')[:50]}...")
 
-            # 2. GPT-4 호출
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "당신은 한국 주식 시장 분석 전문가입니다. 뉴스 분석을 통해 주가 예측을 수행합니다.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,  # 낮은 temperature로 일관성 확보
-                max_tokens=1000,
-                response_format={"type": "json_object"},  # JSON 응답 강제
-            )
+            # 2. LLM 호출 (OpenRouter는 JSON mode 미지원)
+            if settings.LLM_PROVIDER == "openrouter":
+                # OpenRouter: JSON mode 없이 호출, 응답에서 JSON 추출
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 한국 주식 시장 분석 전문가입니다. 뉴스 분석을 통해 주가 예측을 수행합니다. 반드시 JSON 형식으로만 응답하세요.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000,
+                )
+            else:
+                # OpenAI: JSON mode 사용
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 한국 주식 시장 분석 전문가입니다. 뉴스 분석을 통해 주가 예측을 수행합니다.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
+                )
 
             # 3. 응답 파싱
             result_text = response.choices[0].message.content
+
+            # OpenRouter 응답에서 JSON 추출 (```json ... ``` 형식일 수 있음)
+            if settings.LLM_PROVIDER == "openrouter" and "```json" in result_text:
+                import re
+                json_match = re.search(r'```json\s*(\{.*?\})\s*```', result_text, re.DOTALL)
+                if json_match:
+                    result_text = json_match.group(1)
+
             result = json.loads(result_text)
 
             # 4. 결과 보강
@@ -584,6 +644,185 @@ class StockPredictor:
             "model": self.model,
             "timestamp": datetime.now().isoformat(),
             "error": error_msg,
+        }
+
+    def _predict_with_model(
+        self,
+        client: OpenAI,
+        model_name: str,
+        provider: str,
+        prompt: str,
+        similar_count: int,
+    ) -> Dict[str, Any]:
+        """
+        특정 모델로 예측 수행 (내부 헬퍼 메서드)
+
+        Args:
+            client: OpenAI 클라이언트
+            model_name: 모델 이름
+            provider: 프로바이더 (openai/openrouter)
+            prompt: 예측 프롬프트
+            similar_count: 유사 뉴스 개수
+
+        Returns:
+            예측 결과
+        """
+        try:
+            # LLM 호출
+            if provider == "openrouter":
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 한국 주식 시장 분석 전문가입니다. 뉴스 분석을 통해 주가 예측을 수행합니다. 반드시 JSON 형식으로만 응답하세요.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000,
+                )
+            else:  # openai
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 한국 주식 시장 분석 전문가입니다. 뉴스 분석을 통해 주가 예측을 수행합니다.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
+                )
+
+            # 응답 파싱
+            result_text = response.choices[0].message.content
+
+            # OpenRouter 응답에서 JSON 추출
+            if provider == "openrouter" and "```json" in result_text:
+                import re
+                json_match = re.search(r'```json\s*(\{.*?\})\s*```', result_text, re.DOTALL)
+                if json_match:
+                    result_text = json_match.group(1)
+
+            result = json.loads(result_text)
+
+            # 결과 보강
+            result["similar_count"] = similar_count
+            result["model"] = model_name
+            result["provider"] = provider
+            result["timestamp"] = datetime.now().isoformat()
+
+            # 하위 호환성 처리
+            if "confidence_breakdown" not in result:
+                result["confidence_breakdown"] = {
+                    "similar_news_quality": result.get("confidence", 0),
+                    "pattern_consistency": 0,
+                    "disclosure_impact": 0,
+                    "explanation": "구 버전 응답"
+                }
+            if "pattern_analysis" not in result:
+                result["pattern_analysis"] = {
+                    "avg_1d": None,
+                    "avg_3d": None,
+                    "avg_5d": None,
+                }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"모델 {model_name} 예측 실패: {e}")
+            return {
+                "prediction": "유지",
+                "confidence": 0,
+                "reasoning": f"예측 실패: {str(e)}",
+                "short_term": "예측 불가",
+                "medium_term": "예측 불가",
+                "long_term": "예측 불가",
+                "similar_count": similar_count,
+                "model": model_name,
+                "provider": provider,
+                "timestamp": datetime.now().isoformat(),
+                "error": str(e),
+            }
+
+    def dual_predict(
+        self,
+        current_news: Dict[str, Any],
+        similar_news: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        A/B 테스트: 두 모델로 동시 예측
+
+        Args:
+            current_news: 현재 뉴스 정보
+            similar_news: 유사 뉴스 리스트
+
+        Returns:
+            A/B 비교 결과
+            {
+                "ab_test_enabled": true,
+                "model_a": {...},
+                "model_b": {...},
+                "comparison": {
+                    "agreement": bool,
+                    "confidence_diff": int,
+                    "stronger_model": str
+                }
+            }
+        """
+        if not settings.AB_TEST_ENABLED:
+            raise ValueError("A/B 테스트가 비활성화되어 있습니다")
+
+        logger.info("🔬 A/B 테스트 예측 시작")
+
+        # 프롬프트 생성 (공통)
+        prompt = self._build_prompt(current_news, similar_news)
+        similar_count = len(similar_news)
+
+        # Model A 예측
+        logger.info(f"  📊 Model A ({self.model_a}) 예측 중...")
+        result_a = self._predict_with_model(
+            self.client_a,
+            self.model_a,
+            settings.MODEL_A_PROVIDER,
+            prompt,
+            similar_count
+        )
+
+        # Model B 예측
+        logger.info(f"  📊 Model B ({self.model_b}) 예측 중...")
+        result_b = self._predict_with_model(
+            self.client_b,
+            self.model_b,
+            settings.MODEL_B_PROVIDER,
+            prompt,
+            similar_count
+        )
+
+        # 비교 분석
+        pred_a = result_a.get("prediction", "유지")
+        pred_b = result_b.get("prediction", "유지")
+        conf_a = result_a.get("confidence", 0)
+        conf_b = result_b.get("confidence", 0)
+
+        comparison = {
+            "agreement": pred_a == pred_b,
+            "confidence_diff": abs(conf_a - conf_b),
+            "stronger_model": "model_a" if conf_a > conf_b else "model_b" if conf_b > conf_a else "tie",
+            "prediction_match": pred_a == pred_b,
+        }
+
+        logger.info(f"  ✅ A/B 테스트 완료 - 일치: {comparison['agreement']}, 신뢰도 차이: {comparison['confidence_diff']}%")
+
+        return {
+            "ab_test_enabled": True,
+            "model_a": result_a,
+            "model_b": result_b,
+            "comparison": comparison,
+            "timestamp": datetime.now().isoformat(),
         }
 
 

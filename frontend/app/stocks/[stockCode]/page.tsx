@@ -57,13 +57,35 @@ interface DirectionDistribution {
   hold: number;
 }
 
-interface AnalysisSummary {
+interface SingleModelSummary {
   overall_summary: string;
   short_term_scenario?: string | null;
   medium_term_scenario?: string | null;
   long_term_scenario?: string | null;
   risk_factors: string[];
   opportunity_factors: string[];
+  recommendation?: string | null;
+}
+
+interface ABTestSummary {
+  ab_test_enabled: true;
+  model_a: SingleModelSummary;
+  model_b: SingleModelSummary;
+  comparison?: {
+    recommendation_match: boolean;
+    risk_overlap: string[];
+    opportunity_overlap: string[];
+  };
+}
+
+interface AnalysisSummary {
+  // Single model fields (backward compatibility)
+  overall_summary?: string;
+  short_term_scenario?: string | null;
+  medium_term_scenario?: string | null;
+  long_term_scenario?: string | null;
+  risk_factors?: string[];
+  opportunity_factors?: string[];
   recommendation?: string | null;
   statistics?: {
     total_predictions: number;
@@ -75,6 +97,15 @@ interface AnalysisSummary {
   meta?: {
     last_updated: string | null;
     based_on_prediction_count: number;
+  };
+  // A/B test fields
+  ab_test_enabled?: boolean;
+  model_a?: SingleModelSummary;
+  model_b?: SingleModelSummary;
+  comparison?: {
+    recommendation_match: boolean;
+    risk_overlap: string[];
+    opportunity_overlap: string[];
   };
 }
 
@@ -130,6 +161,125 @@ export default function StockDetailPage() {
   const formatPercent = (value: number | null | undefined) => {
     if (value === null || value === undefined) return "N/A";
     return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  };
+
+  // 단일 모델 리포트 렌더링 함수
+  const renderModelSummary = (
+    model: SingleModelSummary,
+    modelName: string,
+    bgColor: string,
+    borderColor: string
+  ) => {
+    return (
+      <div className={`flex-1 ${bgColor} rounded-2xl shadow-xl p-6 border ${borderColor}`}>
+        {/* 모델 헤더 */}
+        <div className="mb-6 pb-4 border-b-2 border-gray-300">
+          <h3 className="text-2xl font-bold text-gray-900 flex items-center">
+            <span className="mr-2">🤖</span> {modelName}
+          </h3>
+        </div>
+
+        {/* 종합 의견 */}
+        <div className="mb-6">
+          <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+            <span className="mr-2">📋</span> 종합 의견
+          </h4>
+          <div className="p-4 bg-white rounded-lg shadow border-l-4 border-indigo-400">
+            <p className="text-gray-700 leading-relaxed text-sm">{model.overall_summary}</p>
+          </div>
+        </div>
+
+        {/* 기간별 투자 전략 */}
+        <div className="mb-6">
+          <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+            <span className="mr-2">📅</span> 기간별 투자 전략
+          </h4>
+          <div className="space-y-3">
+            {model.short_term_scenario && (
+              <div className="bg-white rounded-lg p-4 shadow border-l-4 border-red-300">
+                <div className="flex items-center mb-2">
+                  <span className="text-lg mr-2">🔹</span>
+                  <h5 className="text-sm font-bold text-red-700">단기 (1일~1주)</h5>
+                </div>
+                <p className="text-xs text-gray-700 leading-relaxed">{model.short_term_scenario}</p>
+              </div>
+            )}
+
+            {model.medium_term_scenario && (
+              <div className="bg-white rounded-lg p-4 shadow border-l-4 border-yellow-300">
+                <div className="flex items-center mb-2">
+                  <span className="text-lg mr-2">🔸</span>
+                  <h5 className="text-sm font-bold text-yellow-700">중기 (1주~1개월)</h5>
+                </div>
+                <p className="text-xs text-gray-700 leading-relaxed">{model.medium_term_scenario}</p>
+              </div>
+            )}
+
+            {model.long_term_scenario && (
+              <div className="bg-white rounded-lg p-4 shadow border-l-4 border-green-300">
+                <div className="flex items-center mb-2">
+                  <span className="text-lg mr-2">🔶</span>
+                  <h5 className="text-sm font-bold text-green-700">장기 (1개월 이상)</h5>
+                </div>
+                <p className="text-xs text-gray-700 leading-relaxed">{model.long_term_scenario}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 리스크 요인 */}
+        {model.risk_factors && model.risk_factors.length > 0 && (
+          <div className="mb-6">
+            <h4 className="text-lg font-bold text-orange-700 mb-3 flex items-center">
+              <span className="mr-2">⚠️</span> 리스크 요인
+            </h4>
+            <div className="bg-white rounded-lg p-4 shadow border-l-4 border-orange-300">
+              <ul className="space-y-2">
+                {model.risk_factors.map((risk, index) => (
+                  <li key={index} className="text-xs text-gray-700 flex items-start">
+                    <span className="mr-2 text-orange-500 flex-shrink-0">•</span>
+                    <span>{risk}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* 기회 요인 */}
+        {model.opportunity_factors && model.opportunity_factors.length > 0 && (
+          <div className="mb-6">
+            <h4 className="text-lg font-bold text-teal-700 mb-3 flex items-center">
+              <span className="mr-2">💡</span> 기회 요인
+            </h4>
+            <div className="bg-white rounded-lg p-4 shadow border-l-4 border-teal-300">
+              <ul className="space-y-2">
+                {model.opportunity_factors.map((opportunity, index) => (
+                  <li key={index} className="text-xs text-gray-700 flex items-start">
+                    <span className="mr-2 text-teal-500 flex-shrink-0">•</span>
+                    <span>{opportunity}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* 최종 추천 */}
+        {model.recommendation && (
+          <div>
+            <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+              <span className="mr-2">🎯</span> 최종 추천
+            </h4>
+            <div className="bg-white rounded-lg p-4 shadow-lg border-2 border-indigo-200">
+              <p className="text-gray-700 font-medium leading-relaxed text-sm">
+                {model.recommendation}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -242,15 +392,43 @@ export default function StockDetailPage() {
           </div>
         )}
 
-        {/* LLM-Generated Investment Summary - 섹션 구분 명확화 */}
+        {/* LLM-Generated Investment Summary - A/B Test Support */}
         {stock.analysis_summary && (
           <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-2xl shadow-2xl p-8 mb-6 border border-indigo-100">
             {/* 헤더 */}
             <div className="flex items-center justify-between mb-8 pb-6 border-b-2 border-indigo-200">
               <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-transparent flex items-center">
                 <span className="mr-3 text-3xl">🤖</span> AI 종합 투자 리포트
+                {stock.analysis_summary.ab_test_enabled && (
+                  <span className="ml-4 text-sm font-normal text-purple-600 bg-purple-100 px-3 py-1 rounded-full">
+                    A/B Testing
+                  </span>
+                )}
               </h2>
             </div>
+
+            {/* A/B Test Mode: Side-by-side comparison */}
+            {stock.analysis_summary.ab_test_enabled && stock.analysis_summary.model_a && stock.analysis_summary.model_b ? (
+              <div className="flex gap-6">
+                {/* Model A (GPT-4o) */}
+                {renderModelSummary(
+                  stock.analysis_summary.model_a,
+                  "Model A (GPT-4o)",
+                  "bg-blue-50",
+                  "border-blue-200"
+                )}
+
+                {/* Model B (DeepSeek) */}
+                {renderModelSummary(
+                  stock.analysis_summary.model_b,
+                  "Model B (DeepSeek)",
+                  "bg-green-50",
+                  "border-green-200"
+                )}
+              </div>
+            ) : (
+              // Single Model Mode (Backward Compatibility)
+              <div>
 
             {/* Section 1: 종합 의견 */}
             <div className="mb-10">
@@ -374,6 +552,24 @@ export default function StockDetailPage() {
             )}
 
             {/* Meta Info - 세련된 푸터 */}
+            {stock.analysis_summary.meta && (
+              <div className="mt-6 pt-5 border-t border-gray-300">
+                <div className="flex items-center justify-center text-sm text-gray-500">
+                  <span className="mr-2">📊</span>
+                  <span className="font-medium">분석 기준: {stock.analysis_summary.meta.based_on_prediction_count}건의 예측</span>
+                  {isMounted && stock.analysis_summary.meta.last_updated && (
+                    <>
+                      <span className="mx-2">|</span>
+                      <span>마지막 업데이트: {new Date(stock.analysis_summary.meta.last_updated).toLocaleString("ko-KR")}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+              </div>
+            )}
+
+            {/* Common Meta Info Footer */}
             {stock.analysis_summary.meta && (
               <div className="mt-6 pt-5 border-t border-gray-300">
                 <div className="flex items-center justify-center text-sm text-gray-500">

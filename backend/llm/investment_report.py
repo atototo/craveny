@@ -27,6 +27,28 @@ class InvestmentReportGenerator:
         self.model = "gpt-4o-mini"  # 비용 효율적인 모델
         self.stock_mapper = get_stock_mapper()
 
+        # A/B 테스트를 위한 추가 클라이언트
+        if settings.AB_TEST_ENABLED:
+            self.client_a = self._create_client(settings.MODEL_A_PROVIDER)
+            self.model_a = settings.MODEL_A_NAME
+            self.client_b = self._create_client(settings.MODEL_B_PROVIDER)
+            self.model_b = settings.MODEL_B_NAME
+            logger.info(f"A/B 테스트 활성화 (종합 리포트): Model A={self.model_a}, Model B={self.model_b}")
+
+    def _create_client(self, provider: str) -> OpenAI:
+        """프로바이더별 OpenAI 클라이언트 생성"""
+        if provider == "openrouter":
+            return OpenAI(
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://craveny.ai",
+                    "X-Title": "Craveny Investment Report",
+                }
+            )
+        else:  # openai
+            return OpenAI(api_key=settings.OPENAI_API_KEY)
+
     def generate_report(
         self,
         stock_code: str,
@@ -257,6 +279,149 @@ class InvestmentReportGenerator:
                 f"- 기간별 예측: {news.get('short_term') or 'N/A'} / {news.get('medium_term') or 'N/A'} / {news.get('long_term') or 'N/A'}"
             )
         return "\n\n".join(lines)
+
+    def dual_generate_report(
+        self,
+        stock_code: str,
+        predictions: List[Prediction],
+        current_price: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        A/B 테스트: 두 모델로 종합 투자 리포트 생성
+
+        Args:
+            stock_code: 종목 코드
+            predictions: 최근 예측 리스트
+            current_price: 현재 주가 정보
+
+        Returns:
+            {
+                "ab_test_enabled": true,
+                "model_a": {...},
+                "model_b": {...},
+                "comparison": {...}
+            }
+        """
+        if not settings.AB_TEST_ENABLED:
+            raise ValueError("A/B 테스트가 비활성화되어 있습니다")
+
+        if not predictions:
+            return {
+                "ab_test_enabled": True,
+                "model_a": self._empty_report(),
+                "model_b": self._empty_report(),
+                "comparison": {
+                    "recommendation_match": False,
+                    "risk_overlap": [],
+                    "opportunity_overlap": [],
+                }
+            }
+
+        try:
+            # 공통 데이터 준비
+            report_data = self._prepare_report_data(stock_code, predictions, current_price)
+            prompt = self._build_prompt(report_data)
+
+            logger.info(f"A/B 종합 리포트 생성: {stock_code} ({len(predictions)}건 분석)")
+
+            # Model A (GPT-4o) 호출
+            response_a = self.client_a.chat.completions.create(
+                model=self.model_a,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "당신은 한국 주식 시장의 베테랑 애널리스트입니다. 데이터 기반으로 명확하고 실용적인 투자 리포트를 작성합니다.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+                max_tokens=1000,
+                response_format={"type": "json_object"},
+            )
+
+            result_a = json.loads(response_a.choices[0].message.content)
+            result_a["model"] = self.model_a
+            result_a["provider"] = settings.MODEL_A_PROVIDER
+
+            # Model B (DeepSeek) 호출
+            response_b = self.client_b.chat.completions.create(
+                model=self.model_b,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "당신은 한국 주식 시장의 베테랑 애널리스트입니다. 데이터 기반으로 명확하고 실용적인 투자 리포트를 작성합니다.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+                max_tokens=1000,
+            )
+
+            result_b_text = response_b.choices[0].message.content
+
+            # OpenRouter JSON 추출
+            if settings.MODEL_B_PROVIDER == "openrouter" and "```json" in result_b_text:
+                import re
+                json_match = re.search(r'```json\s*(\{.*?\})\s*```', result_b_text, re.DOTALL)
+                if json_match:
+                    result_b_text = json_match.group(1)
+
+            result_b = json.loads(result_b_text)
+            result_b["model"] = self.model_b
+            result_b["provider"] = settings.MODEL_B_PROVIDER
+
+            # 비교 분석
+            comparison = self._compare_reports(result_a, result_b)
+
+            logger.info(
+                f"A/B 종합 리포트 완료: {stock_code} - "
+                f"추천 일치: {comparison['recommendation_match']}"
+            )
+
+            return {
+                "ab_test_enabled": True,
+                "model_a": result_a,
+                "model_b": result_b,
+                "comparison": comparison,
+            }
+
+        except Exception as e:
+            logger.error(f"A/B 종합 리포트 실패: {e}", exc_info=True)
+            return {
+                "ab_test_enabled": True,
+                "model_a": self._empty_report(),
+                "model_b": self._empty_report(),
+                "comparison": {"error": str(e)},
+            }
+
+    def _compare_reports(self, report_a: Dict[str, Any], report_b: Dict[str, Any]) -> Dict[str, Any]:
+        """두 리포트 비교"""
+        # 추천 일치 여부
+        rec_a = report_a.get("recommendation", "").lower()
+        rec_b = report_b.get("recommendation", "").lower()
+
+        recommendation_match = False
+        if ("매수" in rec_a and "매수" in rec_b) or \
+           ("매도" in rec_a and "매도" in rec_b) or \
+           ("관망" in rec_a and "관망" in rec_b) or \
+           ("보유" in rec_a and "보유" in rec_b):
+            recommendation_match = True
+
+        # 리스크 중복
+        risks_a = set(report_a.get("risk_factors", []))
+        risks_b = set(report_b.get("risk_factors", []))
+        risk_overlap = list(risks_a & risks_b)
+
+        # 기회 중복
+        opps_a = set(report_a.get("opportunity_factors", []))
+        opps_b = set(report_b.get("opportunity_factors", []))
+        opportunity_overlap = list(opps_a & opps_b)
+
+        return {
+            "recommendation_match": recommendation_match,
+            "risk_overlap": risk_overlap,
+            "opportunity_overlap": opportunity_overlap,
+        }
 
     def _empty_report(self) -> Dict[str, Any]:
         """빈 리포트 반환"""
