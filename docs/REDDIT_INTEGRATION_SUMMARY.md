@@ -350,6 +350,11 @@ REDDIT_LOOKBACK_HOURS=24
 - Production monitoring setup
 
 ### ⬜ Remaining
+- **CRITICAL**: Migrate news_saver.py auto-prediction to use A/B multi-model system
+  - Current Issue: Legacy single-model predictions (model_id=None) still being created
+  - Impact: Some notifications use old format instead of enhanced A/B format
+  - Root Cause: `news_saver.py:192` calls single predictor, not `predict_all_models()`
+  - Solution: Replace with `predictor.predict_all_models()` + `get_ab_predictions()`
 - Performance optimization based on production metrics
 - Extended Reddit feature (comment sentiment analysis)
 
@@ -392,7 +397,25 @@ REDDIT_LOOKBACK_HOURS=24
 - **Reddit Crawling**: 2 posts/20 attempted (10% relevant rate)
 - **Rate Limiting**: 2 seconds/request (compliant with Reddit API)
 - **Prediction**: Automatic prediction triggered when stock code detected
-- **Notification**: A/B comparison format working correctly
+- **Notification**: A/B comparison format implemented in telegram.py and auto_notify.py
+
+### Known Issues (2025-01-04)
+**Issue #1: Legacy Single-Model Predictions Still Being Created**
+- **Symptom**: Some Telegram alerts show old single-model format (e.g., "deepseek/deepseek-v3.2-exp")
+- **Root Cause**: `backend/crawlers/news_saver.py:192` (`_run_prediction()`) still uses legacy single-model predictor
+  - Calls `self.predictor.predict()` instead of `predict_all_models()`
+  - Creates predictions with `model_id=None` (legacy format)
+  - When `auto_notify.py` calls `get_ab_predictions()`, it falls back to these legacy predictions
+- **Evidence**:
+  - Prediction ID=721 (뉴스 ID=1216, 한화 종목) has `model_id=None`
+  - Notification sent at 2025-01-04 03:18:39 with single-model format
+- **Impact**: Users receive inconsistent notification formats (mix of A/B and single-model)
+- **Priority**: CRITICAL - affects user experience and A/B test data quality
+- **Solution**: Migrate `news_saver.py` to use A/B multi-model prediction system:
+  1. Replace `self.predictor.predict()` with `self.predictor.predict_all_models()`
+  2. Follow same pattern as `auto_notify.py:110-117`
+  3. Ensure all new predictions have proper `model_id` values
+- **Status**: Documented, pending implementation
 
 ---
 
