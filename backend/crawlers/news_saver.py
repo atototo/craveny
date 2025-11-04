@@ -191,14 +191,16 @@ class NewsSaver:
 
     def _run_prediction(self, news_article: NewsArticle, stock_code: str):
         """
-        뉴스에 대한 예측을 실행하고 저장합니다.
+        뉴스에 대한 멀티 모델 예측을 실행하고 저장합니다.
+
+        알림은 전송하지 않습니다 (auto_notify.py에서 처리).
 
         Args:
             news_article: 저장된 뉴스 기사
             stock_code: 종목 코드
         """
         try:
-            logger.info(f"예측 실행 중: 뉴스 ID={news_article.id}, 종목={stock_code}")
+            logger.info(f"멀티 모델 예측 실행 중: 뉴스 ID={news_article.id}, 종목={stock_code}")
 
             # 0. 임베딩 기반 중복 검사 (예측 skip 여부 확인)
             news_text = f"{news_article.title} {news_article.content}"
@@ -227,47 +229,24 @@ class NewsSaver:
 
             logger.info(f"유사 뉴스 검색 완료: {len(similar_news)}건")
 
-            # 2. 예측 실행
+            # 2. 멀티 모델 예측 실행 (모든 활성 모델에 대해)
             current_news = {
                 "title": news_article.title,
                 "content": news_article.content,
                 "stock_code": stock_code,
             }
 
-            prediction_result = self.predictor.predict(
+            # 모든 활성 모델로 예측 생성 (model_id 포함)
+            all_predictions = self.predictor.predict_all_models(
                 current_news=current_news,
                 similar_news=similar_news,
                 news_id=news_article.id,
-                use_cache=True
             )
 
-            if prediction_result:
-                # 예측 방향 변환 (한글 → 영문)
-                prediction_text = prediction_result.get("prediction", "유지")
-                direction_map = {"상승": "up", "하락": "down", "유지": "hold"}
-                direction = direction_map.get(prediction_text, "hold")
-
-                # 신뢰도 변환 (0-100 → 0.0-1.0)
-                confidence_percent = prediction_result.get("confidence", 0)
-                confidence = confidence_percent / 100.0
-
-                # 예측 결과를 DB에 저장
-                prediction = Prediction(
-                    news_id=news_article.id,
-                    stock_code=stock_code,
-                    direction=direction,
-                    confidence=confidence,
-                    reasoning=prediction_result.get("reasoning", ""),
-                    current_price=prediction_result.get("current_price"),
-                    target_period="1일"
-                )
-
-                self.db.add(prediction)
-                self.db.commit()
-
+            if all_predictions:
                 logger.info(
-                    f"예측 저장 완료: 뉴스 ID={news_article.id}, "
-                    f"방향={prediction.direction}, 신뢰도={prediction.confidence:.2f}"
+                    f"✅ 멀티 모델 예측 완료: 뉴스 ID={news_article.id}, "
+                    f"생성된 예측 수={len(all_predictions)}개"
                 )
 
                 # 새 예측 저장 후 종합 분석 리포트 업데이트
