@@ -350,11 +350,12 @@ REDDIT_LOOKBACK_HOURS=24
 - Production monitoring setup
 
 ### ⬜ Remaining
-- **CRITICAL**: Migrate news_saver.py auto-prediction to use A/B multi-model system
-  - Current Issue: Legacy single-model predictions (model_id=None) still being created
-  - Impact: Some notifications use old format instead of enhanced A/B format
-  - Root Cause: `news_saver.py:192` calls single predictor, not `predict_all_models()`
-  - Solution: Replace with `predictor.predict_all_models()` + `get_ab_predictions()`
+- **CRITICAL**: Migrate news_saver.py auto-prediction to use multi-model system
+  - Current Issue: Only creates legacy single-model prediction (model_id=None)
+  - Impact: Missing model-specific predictions needed for A/B notifications
+  - Root Cause: `news_saver.py:192` calls `predict()` instead of `predict_all_models()`
+  - Solution: Replace with `predict_all_models()` to create predictions for all active models
+  - Correct Flow: News saved → predict_all_models() → NO notification | auto_notify → A/B comparison notification
 - Performance optimization based on production metrics
 - Extended Reddit feature (comment sentiment analysis)
 
@@ -400,21 +401,26 @@ REDDIT_LOOKBACK_HOURS=24
 - **Notification**: A/B comparison format implemented in telegram.py and auto_notify.py
 
 ### Known Issues (2025-01-04)
-**Issue #1: Legacy Single-Model Predictions Still Being Created**
+**Issue #1: Legacy Single-Model Predictions Missing Multi-Model Coverage**
 - **Symptom**: Some Telegram alerts show old single-model format (e.g., "deepseek/deepseek-v3.2-exp")
-- **Root Cause**: `backend/crawlers/news_saver.py:192` (`_run_prediction()`) still uses legacy single-model predictor
+- **Root Cause**: `backend/crawlers/news_saver.py:192` (`_run_prediction()`) creates only legacy single-model prediction
   - Calls `self.predictor.predict()` instead of `predict_all_models()`
-  - Creates predictions with `model_id=None` (legacy format)
-  - When `auto_notify.py` calls `get_ab_predictions()`, it falls back to these legacy predictions
+  - Creates **only 1 prediction** with `model_id=None` (legacy format)
+  - Does NOT create model-specific predictions (model_id=2, 3) needed for A/B notifications
+  - When `auto_notify.py` calls `get_ab_predictions()`, no A/B predictions exist → falls back to legacy prediction
 - **Evidence**:
-  - Prediction ID=721 (뉴스 ID=1216, 한화 종목) has `model_id=None`
-  - Notification sent at 2025-01-04 03:18:39 with single-model format
-- **Impact**: Users receive inconsistent notification formats (mix of A/B and single-model)
-- **Priority**: CRITICAL - affects user experience and A/B test data quality
-- **Solution**: Migrate `news_saver.py` to use A/B multi-model prediction system:
-  1. Replace `self.predictor.predict()` with `self.predictor.predict_all_models()`
-  2. Follow same pattern as `auto_notify.py:110-117`
-  3. Ensure all new predictions have proper `model_id` values
+  - 뉴스 ID=1216 (한화): **only 1 prediction** (ID=721, model_id=None)
+  - Missing: model_id=2 (DeepSeek) and model_id=3 (Qwen) predictions
+  - Notification sent at 2025-11-04 03:18:39 with single-model format (fallback)
+- **Impact**: Users receive old single-model format instead of enhanced A/B comparison format
+- **Priority**: CRITICAL - affects user experience and A/B test effectiveness
+- **Correct Flow**:
+  1. News saved → `predict_all_models()` creates predictions for ALL active models (model_id=2,3) → **NO notification**
+  2. `auto_notify.py` runs → `get_ab_predictions()` retrieves A/B pair → **A/B comparison notification sent**
+- **Solution**: Migrate `news_saver.py:192-289` to multi-model prediction:
+  1. Replace `self.predictor.predict()` with `predictor.predict_all_models()`
+  2. Remove legacy Prediction saving logic (lines 255-270)
+  3. Keep notification disabled in news_saver (notifications handled by auto_notify only)
 - **Status**: Documented, pending implementation
 
 ---
