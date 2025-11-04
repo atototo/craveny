@@ -15,7 +15,10 @@ from backend.config import settings
 from backend.llm.prediction_cache import get_prediction_cache
 from backend.db.models.stock import StockPrice, Stock
 from backend.db.models.news import NewsArticle
+from backend.db.models.model import Model
+from backend.db.models.ab_test_config import ABTestConfig
 from backend.db.session import SessionLocal
+from sqlalchemy import text
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,7 @@ class StockPredictor:
 
     def __init__(self):
         """예측 모델 초기화"""
+        # 기존 호환성을 위한 기본 클라이언트
         if settings.LLM_PROVIDER == "openrouter":
             self.client = OpenAI(
                 api_key=settings.OPENROUTER_API_KEY,
@@ -44,13 +48,17 @@ class StockPredictor:
 
         self.cache = get_prediction_cache()
 
-        # A/B 테스트를 위한 추가 클라이언트
+        # 멀티모델: DB에서 활성 모델 로드
+        self.active_models = self._load_active_models()
+        logger.info(f"✅ 활성 모델 {len(self.active_models)}개 로드 완료")
+
+        # 레거시 A/B 테스트 (환경변수 기반) - 하위 호환성
         if settings.AB_TEST_ENABLED:
             self.client_a = self._create_client(settings.MODEL_A_PROVIDER)
             self.model_a = settings.MODEL_A_NAME
             self.client_b = self._create_client(settings.MODEL_B_PROVIDER)
             self.model_b = settings.MODEL_B_NAME
-            logger.info(f"A/B 테스트 활성화: Model A={self.model_a}, Model B={self.model_b}")
+            logger.info(f"A/B 테스트 활성화 (레거시): Model A={self.model_a}, Model B={self.model_b}")
 
     def _create_client(self, provider: str) -> OpenAI:
         """프로바이더별 OpenAI 클라이언트 생성"""
@@ -65,6 +73,172 @@ class StockPredictor:
             )
         else:  # openai
             return OpenAI(api_key=settings.OPENAI_API_KEY)
+
+    def _load_active_models(self) -> Dict[int, Dict[str, Any]]:
+        """
+        DB에서 활성 모델 목록을 조회하고 클라이언트를 생성합니다.
+
+        Returns:
+            {model_id: {"name": "...", "provider": "...", "model_identifier": "...", "client": OpenAI(...)}}
+        """
+        db = SessionLocal()
+        try:
+            models = db.query(Model).filter(Model.is_active == True).all()
+            result = {}
+
+            for model in models:
+                client = self._create_client(model.provider)
+                result[model.id] = {
+                    "name": model.name,
+                    "provider": model.provider,
+                    "model_identifier": model.model_identifier,
+                    "client": client,
+                    "description": model.description,
+                }
+                logger.info(f"  📊 Model loaded: {model.name} ({model.provider}/{model.model_identifier})")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"활성 모델 로드 실패: {e}")
+            return {}
+        finally:
+            db.close()
+
+    def _save_model_prediction(
+        self,
+        news_id: int,
+        model_id: int,
+        stock_code: str,
+        prediction_data: Dict[str, Any]
+    ) -> None:
+        """
+        모델 예측 결과를 predictions 테이블에 저장합니다.
+
+        Args:
+            news_id: 뉴스 ID
+            model_id: 모델 ID
+            stock_code: 종목 코드
+            prediction_data: 예측 결과
+        """
+        db = SessionLocal()
+        try:
+            from backend.db.models.prediction import Prediction
+
+            # 기존 예측이 있는지 확인
+            existing = db.query(Prediction).filter(
+                Prediction.news_id == news_id,
+                Prediction.model_id == model_id
+            ).first()
+
+            # prediction_data에서 필드 추출
+            direction = prediction_data.get("direction", "hold")
+            confidence = prediction_data.get("confidence", 0.5)
+            reasoning = prediction_data.get("reasoning", "")
+            current_price = prediction_data.get("current_price")
+            short_term = prediction_data.get("short_term")
+            medium_term = prediction_data.get("medium_term")
+            long_term = prediction_data.get("long_term")
+            confidence_breakdown = prediction_data.get("confidence_breakdown")
+            pattern_analysis = prediction_data.get("pattern_analysis")
+
+            if existing:
+                # UPDATE
+                existing.direction = direction
+                existing.confidence = confidence
+                existing.reasoning = reasoning
+                existing.current_price = current_price
+                existing.short_term = short_term
+                existing.medium_term = medium_term
+                existing.long_term = long_term
+                existing.confidence_breakdown = confidence_breakdown
+                existing.pattern_analysis = pattern_analysis
+                existing.created_at = datetime.now()
+            else:
+                # INSERT
+                new_prediction = Prediction(
+                    news_id=news_id,
+                    model_id=model_id,
+                    stock_code=stock_code,
+                    direction=direction,
+                    confidence=confidence,
+                    reasoning=reasoning,
+                    current_price=current_price,
+                    short_term=short_term,
+                    medium_term=medium_term,
+                    long_term=long_term,
+                    confidence_breakdown=confidence_breakdown,
+                    pattern_analysis=pattern_analysis,
+                )
+                db.add(new_prediction)
+
+            db.commit()
+            logger.debug(f"모델 {model_id} 예측 저장 완료: news_id={news_id}, direction={direction}, confidence={confidence:.2f}")
+
+        except Exception as e:
+            logger.error(f"모델 예측 저장 실패 (news_id={news_id}, model_id={model_id}): {e}", exc_info=True)
+            db.rollback()
+        finally:
+            db.close()
+
+    def _get_prediction_from_db(
+        self,
+        news_id: int,
+        model_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        predictions 테이블에서 특정 모델의 예측 결과를 조회합니다.
+
+        Args:
+            news_id: 뉴스 ID
+            model_id: 모델 ID
+
+        Returns:
+            예측 결과 또는 None
+        """
+        db = SessionLocal()
+        try:
+            from backend.db.models.prediction import Prediction
+
+            prediction = db.query(Prediction).filter(
+                Prediction.news_id == news_id,
+                Prediction.model_id == model_id
+            ).first()
+
+            if not prediction:
+                return None
+
+            # Prediction 객체를 딕셔너리로 변환
+            return {
+                "direction": prediction.direction,
+                "confidence": prediction.confidence,
+                "reasoning": prediction.reasoning,
+                "current_price": prediction.current_price,
+                "short_term": prediction.short_term,
+                "medium_term": prediction.medium_term,
+                "long_term": prediction.long_term,
+                "confidence_breakdown": prediction.confidence_breakdown,
+                "pattern_analysis": prediction.pattern_analysis,
+                "created_at": prediction.created_at.isoformat() if prediction.created_at else None,
+            }
+
+        except Exception as e:
+            logger.error(f"모델 예측 조회 실패: {e}")
+            return None
+        finally:
+            db.close()
+
+    def _get_active_ab_config(self) -> Optional[ABTestConfig]:
+        """현재 활성화된 A/B 설정을 조회합니다."""
+        db = SessionLocal()
+        try:
+            config = db.query(ABTestConfig).filter(ABTestConfig.is_active == True).first()
+            return config
+        except Exception as e:
+            logger.error(f"A/B 설정 조회 실패: {e}")
+            return None
+        finally:
+            db.close()
 
     def _get_stock_info(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """
@@ -821,6 +995,108 @@ class StockPredictor:
             "ab_test_enabled": True,
             "model_a": result_a,
             "model_b": result_b,
+            "comparison": comparison,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def predict_all_models(
+        self,
+        current_news: Dict[str, Any],
+        similar_news: List[Dict[str, Any]],
+        news_id: int,
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        모든 활성 모델로 예측을 생성하고 DB에 저장합니다.
+
+        Args:
+            current_news: 현재 뉴스 정보
+            similar_news: 유사 뉴스 리스트
+            news_id: 뉴스 ID
+
+        Returns:
+            {model_id: prediction_result, ...}
+        """
+        stock_code = current_news.get("stock_code")
+        similar_count = len(similar_news)
+        results = {}
+
+        # 프롬프트 생성 (공통)
+        prompt = self._build_prompt(current_news, similar_news)
+
+        logger.info(f"🔬 모든 활성 모델로 예측 시작: news_id={news_id}, models={len(self.active_models)}")
+
+        for model_id, model_info in self.active_models.items():
+            logger.info(f"  📊 {model_info['name']} 예측 중...")
+
+            # 예측 실행
+            prediction = self._predict_with_model(
+                model_info["client"],
+                model_info["model_identifier"],
+                model_info["provider"],
+                prompt,
+                similar_count
+            )
+
+            # 결과에 model_id 추가
+            prediction["model_id"] = model_id
+            prediction["model"] = model_info["name"]
+
+            # DB 저장
+            self._save_model_prediction(news_id, model_id, stock_code, prediction)
+
+            results[model_id] = prediction
+
+        logger.info(f"✅ 모든 모델 예측 완료: {len(results)}개")
+        return results
+
+    def get_ab_predictions(self, news_id: int) -> Dict[str, Any]:
+        """
+        현재 A/B 설정에 따라 두 모델의 예측을 조회합니다.
+
+        Args:
+            news_id: 뉴스 ID
+
+        Returns:
+            {
+                "model_a": {...},
+                "model_b": {...},
+                "comparison": {...}
+            }
+        """
+        # 활성 A/B 설정 조회
+        ab_config = self._get_active_ab_config()
+        if not ab_config:
+            logger.warning("활성 A/B 설정 없음")
+            return {
+                "error": "활성 A/B 설정이 없습니다",
+                "model_a": None,
+                "model_b": None,
+            }
+
+        # 두 모델의 예측 조회
+        pred_a = self._get_prediction_from_db(news_id, ab_config.model_a_id)
+        pred_b = self._get_prediction_from_db(news_id, ab_config.model_b_id)
+
+        if not pred_a or not pred_b:
+            logger.warning(f"예측 결과 없음: model_a={pred_a is not None}, model_b={pred_b is not None}")
+            return {
+                "error": "예측 결과가 없습니다. 먼저 predict_all_models()를 실행하세요.",
+                "model_a": pred_a,
+                "model_b": pred_b,
+            }
+
+        # 비교 분석
+        comparison = {
+            "agreement": pred_a.get("prediction") == pred_b.get("prediction"),
+            "confidence_diff": abs(pred_a.get("confidence", 0) - pred_b.get("confidence", 0)),
+            "stronger_model": "model_a" if pred_a.get("confidence", 0) > pred_b.get("confidence", 0) else "model_b",
+            "prediction_match": pred_a.get("prediction") == pred_b.get("prediction"),
+        }
+
+        return {
+            "ab_test_enabled": True,  # 텔레그램 알림 호환성
+            "model_a": pred_a,
+            "model_b": pred_b,
             "comparison": comparison,
             "timestamp": datetime.now().isoformat(),
         }

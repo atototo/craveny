@@ -324,8 +324,14 @@ async def get_stock_detail(
                 for key in ["similar_news_quality", "pattern_consistency", "disclosure_impact"]:
                     val = pred.confidence_breakdown.get(key)
                     if val is not None:
-                        breakdown_sums[key] += val
-                        breakdown_counts[key] += 1
+                        try:
+                            # 문자열로 저장된 경우를 대비해 float로 변환
+                            val_float = float(val)
+                            breakdown_sums[key] += val_float
+                            breakdown_counts[key] += 1
+                        except (ValueError, TypeError):
+                            # 변환 실패 시 건너뛰기
+                            continue
 
         for key in ["similar_news_quality", "pattern_consistency", "disclosure_impact"]:
             if breakdown_counts[key] > 0:
@@ -349,8 +355,15 @@ async def get_stock_detail(
                 for key in ["avg_1d", "avg_2d", "avg_3d", "avg_5d", "avg_10d", "avg_20d"]:
                     val = pred.pattern_analysis.get(key)
                     if val is not None and val != 0.0:  # 0.0은 제외 (의미 없는 데이터)
-                        pattern_sums[key] += val
-                        pattern_counts[key] += 1
+                        try:
+                            # 문자열로 저장된 경우를 대비해 float로 변환
+                            val_float = float(val)
+                            if val_float != 0.0:
+                                pattern_sums[key] += val_float
+                                pattern_counts[key] += 1
+                        except (ValueError, TypeError):
+                            # 변환 실패 시 건너뛰기
+                            continue
 
         for key in ["avg_1d", "avg_2d", "avg_3d", "avg_5d", "avg_10d", "avg_20d"]:
             if pattern_counts[key] > 0:

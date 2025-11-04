@@ -12,6 +12,8 @@ from backend.db.models.news import NewsArticle
 from backend.llm.vector_search import get_vector_search
 from backend.llm.predictor import get_predictor
 from backend.notifications.telegram import get_telegram_notifier
+from backend.utils.embedding_deduplicator import get_embedding_deduplicator
+from backend.config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -58,16 +60,37 @@ def process_new_news_notifications(
         vector_search = get_vector_search()
         predictor = get_predictor()
         notifier = get_telegram_notifier()
+        embedding_deduplicator = get_embedding_deduplicator()
 
         success_count = 0
         failed_count = 0
+        skipped_count = 0
 
         for news in recent_news:
             try:
                 logger.info(f"처리 중: {news.title[:50]}... (종목: {news.stock_code})")
 
-                # 1. 유사 뉴스 검색
+                # 0. 임베딩 기반 알림 중복 검사
                 news_text = f"{news.title}\n{news.content}"
+                should_skip, similar_id, similarity = embedding_deduplicator.should_skip_notification(
+                    news_text=news_text,
+                    stock_code=news.stock_code,
+                    db=db,
+                    notification_lookback_hours=4,
+                )
+
+                if should_skip:
+                    logger.info(
+                        f"🔕 유사 뉴스 알림 이력 존재 (유사도={similarity:.3f}) "
+                        f"→ 알림 skip (뉴스 ID={news.id}, 유사 뉴스 ID={similar_id})"
+                    )
+                    # notified_at 업데이트 (알림 skip했지만 처리는 완료)
+                    news.notified_at = datetime.utcnow()
+                    db.commit()
+                    skipped_count += 1
+                    continue
+
+                # 1. 유사 뉴스 검색
                 similar_news = vector_search.get_news_with_price_changes(
                     news_text=news_text,
                     stock_code=news.stock_code,
@@ -83,12 +106,15 @@ def process_new_news_notifications(
                     "stock_code": news.stock_code,
                 }
 
-                prediction = predictor.predict(
+                # 멀티모델 예측: 모든 활성 모델로 예측 생성
+                all_predictions = predictor.predict_all_models(
                     current_news=current_news_data,
                     similar_news=similar_news,
                     news_id=news.id,
-                    use_cache=True,  # 캐시 사용
                 )
+
+                # A/B 설정에 따라 표시할 두 모델 예측 조회
+                prediction = predictor.get_ab_predictions(news_id=news.id)
 
                 # 3. 텔레그램 알림 전송
                 if notifier.send_prediction(
@@ -101,9 +127,10 @@ def process_new_news_notifications(
                     db.commit()
 
                     success_count += 1
+                    comp = prediction.get("comparison", {})
                     logger.info(
-                        f"✅ 알림 전송 성공: {news.title[:30]}... "
-                        f"({prediction['prediction']}, {prediction['confidence']}%)"
+                        f"✅ A/B 알림 전송 성공: {news.title[:30]}... "
+                        f"(모델 {len(all_predictions)}개 예측 완료, A/B 일치: {comp.get('agreement')}, 차이: {comp.get('confidence_diff')}%)"
                     )
                 else:
                     failed_count += 1
@@ -114,13 +141,14 @@ def process_new_news_notifications(
                 logger.error(f"❌ 뉴스 처리 실패 (ID={news.id}): {e}", exc_info=True)
 
         logger.info(
-            f"📊 자동 알림 완료: 성공 {success_count}건, 실패 {failed_count}건"
+            f"📊 자동 알림 완료: 성공 {success_count}건, 실패 {failed_count}건, skip {skipped_count}건"
         )
 
         return {
             "processed": len(recent_news),
             "success": success_count,
             "failed": failed_count,
+            "skipped": skipped_count,
         }
 
     except Exception as e:

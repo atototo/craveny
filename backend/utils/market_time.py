@@ -61,11 +61,21 @@ def get_price_threshold(market_phase: str) -> float:
 
 def get_direction_threshold(market_phase: str) -> float:
     """시장 단계별 예측 방향 변화 감지 임계값
-    
+
     Args:
         market_phase: 시장 단계
-    
+
     Returns:
         float: 임계값 (0.0 ~ 1.0)
     """
     return 0.15 if market_phase in ["trading", "market_open", "market_close"] else 0.20
+
+
+def is_market_open() -> bool:
+    """한국 증시 개장 여부 확인
+
+    Returns:
+        bool: 장중이면 True, 아니면 False
+    """
+    phase = get_market_phase()
+    return phase in ["market_open", "trading", "market_close"]

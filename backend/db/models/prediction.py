@@ -2,6 +2,7 @@
 Prediction model for storing stock prediction results.
 """
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Index, JSON
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.db.base import Base
 
@@ -13,6 +14,7 @@ class Prediction(Base):
     Attributes:
         id: Primary key
         news_id: 뉴스 ID (외래키)
+        model_id: 모델 ID (외래키, 멀티모델 지원)
         stock_code: 종목 코드
         direction: 예측 방향 (up, down, hold)
         confidence: 예측 신뢰도 (0.0~1.0)
@@ -33,6 +35,7 @@ class Prediction(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     news_id = Column(Integer, ForeignKey("news_articles.id"), nullable=False)
+    model_id = Column(Integer, ForeignKey("models.id"), nullable=False)
     stock_code = Column(String(10), nullable=False, index=True)
     direction = Column(String(10), nullable=False)  # up, down, hold
     confidence = Column(Float, nullable=False)  # 0.0 ~ 1.0
@@ -52,10 +55,15 @@ class Prediction(Base):
     # Phase 2: 패턴 분석 통계 (JSON)
     pattern_analysis = Column(JSON, nullable=True)
 
+    # 관계 (lazy import로 Model 클래스 참조)
+    # model = relationship("Model", backref="predictions")
+
     # 인덱스
     __table_args__ = (
         Index("idx_predictions_stock_code_created", "stock_code", "created_at"),
         Index("idx_predictions_news_id", "news_id"),
+        Index("idx_predictions_model_id", "model_id"),
+        Index("idx_predictions_news_model", "news_id", "model_id"),
     )
 
     def __repr__(self) -> str:

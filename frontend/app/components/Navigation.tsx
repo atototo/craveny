@@ -12,6 +12,8 @@ export default function Navigation() {
     { href: "/", label: "대시보드" },
     { href: "/stocks", label: "종목 분석" },
     { href: "/predictions", label: "예측 이력" },
+    { href: "/models", label: "🤖 모델 관리" },
+    { href: "/ab-config", label: "🔬 A/B 설정" },
     { href: "/admin/dashboard", label: "⚙️ 관리자" },
     { href: "/admin/stocks", label: "⚙️ 종목 관리" },
   ];

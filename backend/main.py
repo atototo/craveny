@@ -34,13 +34,15 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from backend.api import health, prediction, dashboard, news, stocks, stock_management
+from backend.api import health, prediction, dashboard, news, stocks, stock_management, ab_test, models
 app.include_router(health.router, tags=["Health"])
 app.include_router(prediction.router, tags=["Prediction"])
 app.include_router(dashboard.router, tags=["Dashboard"])
 app.include_router(news.router, tags=["News"])
 app.include_router(stocks.router, tags=["Stocks"])
 app.include_router(stock_management.router, tags=["Stock Management"])
+app.include_router(ab_test.router, prefix="/api", tags=["A/B Test"])
+app.include_router(models.router, prefix="/api", tags=["Models"])
 
 
 @app.on_event("startup")
