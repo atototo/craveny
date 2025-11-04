@@ -10,10 +10,11 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from backend.crawlers.base_crawler import NewsArticleData
-from backend.db.models.news import NewsArticle
+from backend.db.models.news import NewsArticle, ContentType
 from backend.db.models.prediction import Prediction
 from backend.utils.stock_mapping import get_stock_mapper
 from backend.utils.deduplicator import get_deduplicator
+from backend.utils.embedding_deduplicator import get_embedding_deduplicator
 from backend.utils.encoding_normalizer import get_encoding_normalizer
 from backend.llm.predictor import StockPredictor
 from backend.llm.vector_search import get_vector_search
@@ -37,6 +38,7 @@ class NewsSaver:
         self.auto_predict = auto_predict
         self.stock_mapper = get_stock_mapper()
         self.deduplicator = get_deduplicator()
+        self.embedding_deduplicator = get_embedding_deduplicator()
         self.encoding_normalizer = get_encoding_normalizer()
 
         # 자동 예측이 활성화되어 있으면 predictor 초기화
@@ -48,6 +50,25 @@ class NewsSaver:
             except Exception as e:
                 logger.warning(f"예측 시스템 초기화 실패, 자동 예측 비활성화: {e}")
                 self.auto_predict = False
+
+    def _determine_content_type(self, source: str) -> str:
+        """
+        소스 식별자에서 콘텐츠 타입을 결정합니다.
+
+        Args:
+            source: 소스 식별자 (예: "naver", "reddit:r/stocks")
+
+        Returns:
+            content_type 문자열 (소문자)
+        """
+        if source.startswith('reddit:'):
+            return 'reddit'
+        elif source.startswith('twitter:'):
+            return 'twitter'
+        elif source.startswith('telegram:'):
+            return 'telegram'
+        else:
+            return 'news'
 
     def _extract_stock_code(self, news_data: NewsArticleData) -> Optional[str]:
         """
@@ -120,6 +141,14 @@ class NewsSaver:
         # 종목코드 추출
         stock_code = self._extract_stock_code(news_data)
 
+        # content_type 결정
+        content_type = self._determine_content_type(news_data.source)
+
+        # Reddit/Twitter 전용 필드 추출
+        upvotes = news_data.metadata.get('upvotes')
+        num_comments = news_data.metadata.get('num_comments')
+        subreddit = news_data.metadata.get('subreddit')
+
         # NewsArticle 모델 인스턴스 생성
         news_article = NewsArticle(
             title=title,
@@ -127,6 +156,14 @@ class NewsSaver:
             published_at=news_data.published_at,
             source=news_data.source,
             stock_code=stock_code,
+            # Multi-platform 필드
+            content_type=content_type,
+            url=news_data.url,
+            author=news_data.author,
+            upvotes=upvotes,
+            num_comments=num_comments,
+            subreddit=subreddit,
+            extra_metadata=news_data.metadata,
         )
 
         # DB에 저장
@@ -163,9 +200,23 @@ class NewsSaver:
         try:
             logger.info(f"예측 실행 중: 뉴스 ID={news_article.id}, 종목={stock_code}")
 
+            # 0. 임베딩 기반 중복 검사 (예측 skip 여부 확인)
+            news_text = f"{news_article.title} {news_article.content}"
+            should_skip, similar_id, similarity = self.embedding_deduplicator.should_skip_prediction(
+                news_text=news_text,
+                stock_code=stock_code,
+                db=self.db,
+            )
+
+            if should_skip:
+                logger.info(
+                    f"🔴 임베딩 유사도 높음 ({similarity:.3f}) → 예측 skip "
+                    f"(뉴스 ID={news_article.id}, 유사 뉴스 ID={similar_id})"
+                )
+                return
+
             # 1. 유사 뉴스 검색
             vector_search = get_vector_search()
-            news_text = f"{news_article.title} {news_article.content}"
             similar_news = vector_search.get_news_with_price_changes(
                 news_text=news_text,
                 stock_code=stock_code,

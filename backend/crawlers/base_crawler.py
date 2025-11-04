@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class NewsArticleData:
-    """크롤링된 뉴스 기사 데이터 클래스"""
+    """크롤링된 콘텐츠 데이터 클래스 (뉴스, Reddit, Twitter 등)"""
 
     def __init__(
         self,
@@ -28,15 +28,19 @@ class NewsArticleData:
         source: str,
         url: Optional[str] = None,
         company_name: Optional[str] = None,
+        author: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """
         Args:
-            title: 뉴스 제목
-            content: 뉴스 본문
+            title: 콘텐츠 제목
+            content: 콘텐츠 본문
             published_at: 발표 시간
-            source: 언론사 (예: "네이버", "한국경제")
-            url: 뉴스 URL (선택)
+            source: 소스 식별자 (예: "naver", "reddit:r/stocks")
+            url: 콘텐츠 URL (선택)
             company_name: 관련 기업명 (선택)
+            author: 작성자 (선택, Reddit/Twitter용)
+            metadata: 플랫폼별 메타데이터 (선택)
         """
         self.title = title
         self.content = content
@@ -44,6 +48,8 @@ class NewsArticleData:
         self.source = source
         self.url = url
         self.company_name = company_name
+        self.author = author
+        self.metadata = metadata or {}
 
     def __repr__(self) -> str:
         return f"<NewsArticleData(title='{self.title[:30]}...', source='{self.source}')>"

@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "data/logs/app.log"
 
+    # Reddit API
+    REDDIT_CLIENT_ID: str = ""
+    REDDIT_CLIENT_SECRET: str = ""
+    REDDIT_USER_AGENT: str = "Craveny/1.0"
+
+    # Reddit Crawler
+    REDDIT_SUBREDDITS: str = "stocks,investing,Korea_Stock,StockMarket"
+    REDDIT_KEYWORDS: str = "Samsung,SK Hynix,LG,Hyundai,Kia,Korean stocks,KOSPI"
+    REDDIT_MIN_UPVOTES: int = 10
+    REDDIT_MIN_COMMENTS: int = 2
+    REDDIT_LOOKBACK_HOURS: int = 24
+
     class Config:
         env_file = ".env"
         case_sensitive = True

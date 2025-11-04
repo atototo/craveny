@@ -83,11 +83,16 @@ class TelegramNotifier:
         Args:
             news_title: 뉴스 제목
             stock_code: 종목 코드
-            prediction: 예측 결과
+            prediction: 예측 결과 (단일 또는 A/B 비교)
 
         Returns:
             포맷된 메시지
         """
+        # A/B 테스트 모드인지 확인
+        if prediction.get("ab_test_enabled"):
+            return self._format_ab_comparison_message(news_title, stock_code, prediction)
+
+        # 기존 단일 모델 메시지 포맷
         # 예측 방향 이모지
         direction_emoji = {
             "상승": "📈",
@@ -144,6 +149,162 @@ class TelegramNotifier:
 {reasoning}
 
 _유사 뉴스 {prediction.get('similar_count', 0)}건 분석 | {prediction.get('model', 'N/A')}_
+"""
+        return message.strip()
+
+    def _format_ab_comparison_message(
+        self,
+        news_title: str,
+        stock_code: str,
+        prediction: Dict[str, Any],
+    ) -> str:
+        """
+        A/B 테스트 예측 결과를 텔레그램 메시지 포맷으로 변환 (개선 버전)
+
+        Args:
+            news_title: 뉴스 제목
+            stock_code: 종목 코드
+            prediction: A/B 비교 예측 결과
+
+        Returns:
+            포맷된 A/B 비교 메시지
+        """
+        # 예측 방향 이모지
+        direction_emoji = {
+            "상승": "📈",
+            "하락": "📉",
+            "유지": "➡️",
+        }
+
+        model_a = prediction.get("model_a", {})
+        model_b = prediction.get("model_b", {})
+        comparison = prediction.get("comparison", {})
+
+        # 종목명 조회
+        company_name = self.stock_mapper.get_company_name(stock_code)
+        if company_name:
+            stock_display = f"{company_name} ({stock_code})"
+        else:
+            stock_display = stock_code
+
+        # 현재 주가 정보
+        stock_info = self._get_current_stock_info(stock_code)
+        if stock_info:
+            change_emoji = "📈" if stock_info["change_rate"] > 0 else "📉" if stock_info["change_rate"] < 0 else "➡️"
+            current_price = f"{stock_info['close']:,.0f}원 ({change_emoji} {stock_info['change_rate']:+.2f}%)"
+        else:
+            current_price = "정보 없음"
+
+        # Model A 정보
+        pred_a = model_a.get("prediction", "유지")
+        conf_a = model_a.get("confidence", 0)
+        emoji_a = direction_emoji.get(pred_a, "❓")
+        model_a_name = model_a.get("model", "N/A")
+        reasoning_a = model_a.get("reasoning", "")
+        breakdown_a = model_a.get("confidence_breakdown", {})
+        pattern_a = model_a.get("pattern_analysis", {})
+
+        # Model B 정보
+        pred_b = model_b.get("prediction", "유지")
+        conf_b = model_b.get("confidence", 0)
+        emoji_b = direction_emoji.get(pred_b, "❓")
+        model_b_name = model_b.get("model", "N/A")
+        reasoning_b = model_b.get("reasoning", "")
+        breakdown_b = model_b.get("confidence_breakdown", {})
+        pattern_b = model_b.get("pattern_analysis", {})
+
+        # 일치 여부 및 합의 추천
+        agreement = comparison.get("agreement", False)
+        agreement_emoji = "✅" if agreement else "⚠️"
+
+        # 합의 시 강조 메시지
+        if agreement:
+            consensus_line = f"\n🎯 **두 모델 모두 {pred_a} 예측! 신뢰도 높음**\n"
+        else:
+            consensus_line = f"\n⚠️ **모델 간 의견 불일치 - 신중한 판단 필요**\n"
+
+        # 유사 뉴스 개수
+        similar_count = model_a.get('similar_count', 0)
+
+        # 패턴 분석 요약 (더 강한 모델 기준)
+        stronger_model = model_a if conf_a >= conf_b else model_b
+        pattern = stronger_model.get("pattern_analysis", {})
+
+        pattern_summary = ""
+        if pattern and any(pattern.values()):
+            avg_1d = pattern.get("avg_1d")
+            avg_3d = pattern.get("avg_3d")
+            avg_5d = pattern.get("avg_5d")
+
+            if avg_1d is not None or avg_3d is not None or avg_5d is not None:
+                pattern_summary = "\n**📊 과거 유사 사례 패턴**\n"
+                if avg_1d is not None:
+                    pattern_summary += f"• T+1일: 평균 {avg_1d:+.1f}%\n"
+                if avg_3d is not None:
+                    pattern_summary += f"• T+3일: 평균 {avg_3d:+.1f}%\n"
+                if avg_5d is not None:
+                    pattern_summary += f"• T+5일: 평균 {avg_5d:+.1f}%\n"
+
+        # 신뢰도 breakdown (더 강한 모델 기준)
+        breakdown = breakdown_a if conf_a >= conf_b else breakdown_b
+        breakdown_text = ""
+        if breakdown and isinstance(breakdown, dict):
+            similar_quality = breakdown.get("similar_news_quality")
+            pattern_consistency = breakdown.get("pattern_consistency")
+            disclosure_impact = breakdown.get("disclosure_impact")
+
+            if similar_quality is not None or pattern_consistency is not None:
+                breakdown_text = "\n**🔍 신뢰도 구성**\n"
+                if similar_quality is not None:
+                    breakdown_text += f"• 유사 뉴스 품질: {similar_quality}/100\n"
+                if pattern_consistency is not None:
+                    breakdown_text += f"• 패턴 일관성: {pattern_consistency}/100\n"
+                if disclosure_impact is not None:
+                    breakdown_text += f"• 공시 영향도: {disclosure_impact}/100\n"
+
+        # 예측 근거 (최대 150자)
+        reasoning_display = ""
+        if reasoning_a and conf_a >= conf_b:
+            reasoning_display = reasoning_a[:150] + "..." if len(reasoning_a) > 150 else reasoning_a
+        elif reasoning_b:
+            reasoning_display = reasoning_b[:150] + "..." if len(reasoning_b) > 150 else reasoning_b
+
+        message = f"""
+🤖 **AI 주가 예측 (이중 분석)** 🤖
+{consensus_line}
+**📰 뉴스**
+{news_title[:100]}{'...' if len(news_title) > 100 else ''}
+
+**🏢 종목 정보**
+{stock_display}
+현재가: {current_price}
+
+{'━' * 30}
+
+**📊 Model A: {model_a_name}**
+{emoji_a} *{pred_a}* | 신뢰도: {conf_a}%
+• 1일 전망: {model_a.get('short_term', 'N/A')}
+• 3일 전망: {model_a.get('medium_term', 'N/A')}
+• 5일+ 전망: {model_a.get('long_term', 'N/A')}
+
+**📊 Model B: {model_b_name}**
+{emoji_b} *{pred_b}* | 신뢰도: {conf_b}%
+• 1일 전망: {model_b.get('short_term', 'N/A')}
+• 3일 전망: {model_b.get('medium_term', 'N/A')}
+• 5일+ 전망: {model_b.get('long_term', 'N/A')}
+
+{'━' * 30}
+
+**🎯 종합 분석**
+{agreement_emoji} 예측 일치도: {"높음 ✅" if agreement else "낮음 ⚠️"}
+📊 신뢰도 차이: {comparison.get('confidence_diff', 0)}%
+🏆 더 확신하는 모델: {"Model A" if comparison.get('stronger_model') == 'model_a' else "Model B" if comparison.get('stronger_model') == 'model_b' else "동등"}
+{pattern_summary}
+{breakdown_text}
+**💡 예측 근거**
+{reasoning_display if reasoning_display else "분석 중..."}
+
+_📚 유사 뉴스 {similar_count}건 분석 완료_
 """
         return message.strip()
 
