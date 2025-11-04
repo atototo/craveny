@@ -97,10 +97,19 @@ description = "증권 뉴스 예측 및 텔레그램 알림 시스템"
 requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
+dependencies = [
+    "praw>=7.8.1",
+]
 
 [project.scripts]
 craveny = "backend.main:main"
 dev = "backend.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

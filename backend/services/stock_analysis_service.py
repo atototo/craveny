@@ -7,6 +7,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from backend.db.models.prediction import Prediction
 from backend.db.models.stock_analysis import StockAnalysisSummary
@@ -87,14 +88,29 @@ async def update_stock_analysis_summary(
 
         # 4. 업데이트 필요 여부 확인
         if not force_update and existing_summary:
-            # 최신 예측과 비교
-            latest_prediction_count = len(predictions)
-            if existing_summary.based_on_prediction_count >= latest_prediction_count:
+            # 총 예측 개수 조회 (limit 없이)
+            total_prediction_count = (
+                db.query(func.count(Prediction.id))
+                .filter(Prediction.stock_code == stock_code)
+                .scalar()
+            )
+
+            # 예측 개수 증가 또는 24시간 경과 시 업데이트
+            staleness_hours = (datetime.now() - existing_summary.last_updated).total_seconds() / 3600
+
+            if (existing_summary.based_on_prediction_count >= total_prediction_count
+                and staleness_hours < 24):
                 logger.info(
                     f"종목 {stock_code}의 분석 요약이 최신 상태입니다. "
-                    f"(예측 건수: {latest_prediction_count})"
+                    f"(예측 건수: {total_prediction_count}, 경과 시간: {staleness_hours:.1f}시간)"
                 )
                 return existing_summary
+
+            logger.info(
+                f"종목 {stock_code} 업데이트 필요: "
+                f"예측 개수 변화 ({existing_summary.based_on_prediction_count} → {total_prediction_count}) "
+                f"또는 24시간 경과 ({staleness_hours:.1f}시간)"
+            )
 
         # 5. LLM 리포트 생성
         logger.info(f"종목 {stock_code}에 대한 투자 리포트 생성 시작...")
