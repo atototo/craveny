@@ -163,3 +163,156 @@ async def get_system_status():
     except Exception as e:
         logger.error(f"시스템 상태 조회 실패: {e}", exc_info=True)
         raise
+
+
+@router.post("/reports/force-update/{stock_code}")
+async def force_update_single_stock(
+    stock_code: str,
+    db: Session = Depends(get_db)
+):
+    """
+    특정 종목 리포트 강제 업데이트
+
+    Args:
+        stock_code: 종목 코드
+
+    Returns:
+        업데이트 결과 (성공 여부, 메시지)
+    """
+    try:
+        from backend.services.stock_analysis_service import update_stock_analysis_summary
+
+        logger.info(f"종목 {stock_code} 리포트 강제 업데이트 시작")
+
+        result = await update_stock_analysis_summary(
+            stock_code,
+            db,
+            force_update=True
+        )
+
+        if result:
+            logger.info(f"✅ 종목 {stock_code} 리포트 업데이트 성공")
+            return {
+                "success": True,
+                "message": f"종목 {stock_code} 리포트가 성공적으로 업데이트되었습니다.",
+                "last_updated": result.last_updated.isoformat() if result.last_updated else None,
+                "prediction_count": result.based_on_prediction_count
+            }
+        else:
+            logger.warning(f"❌ 종목 {stock_code} 리포트 업데이트 실패")
+            return {
+                "success": False,
+                "message": f"종목 {stock_code} 리포트 생성 실패 (예측 부족 또는 LLM 오류)"
+            }
+
+    except Exception as e:
+        logger.error(f"종목 {stock_code} 리포트 업데이트 오류: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"오류 발생: {str(e)}"
+        }
+
+
+@router.post("/reports/force-update")
+async def force_update_stale_reports(
+    ttl_hours: float = 6.0,
+    db: Session = Depends(get_db)
+):
+    """
+    오래된 리포트 강제 업데이트
+
+    버튼 누른 시점 기준으로 TTL 초과한 리포트를 강제 업데이트합니다.
+
+    Args:
+        ttl_hours: 업데이트 기준 시간 (기본 6시간)
+
+    Returns:
+        업데이트 통계 (검사 종목 수, 업데이트 필요 종목 수, 성공/실패 개수)
+    """
+    try:
+        from backend.db.models.stock_analysis import StockAnalysisSummary
+        from backend.services.stock_analysis_service import update_stock_analysis_summary
+        from backend.utils.stock_mapping import get_stock_mapper
+        import asyncio
+
+        logger.info(f"리포트 강제 업데이트 시작 (TTL: {ttl_hours}시간)")
+
+        # 모든 리포트 조회
+        summaries = db.query(StockAnalysisSummary).all()
+        stock_mapper = get_stock_mapper()
+
+        now = datetime.utcnow()
+        stale_stocks = []
+
+        # 오래된 리포트 찾기
+        for summary in summaries:
+            if summary.last_updated:
+                age_hours = (now - summary.last_updated).total_seconds() / 3600
+                if age_hours > ttl_hours:
+                    stock_name = stock_mapper.get_company_name(summary.stock_code)
+                    stale_stocks.append({
+                        'code': summary.stock_code,
+                        'name': stock_name or summary.stock_code,
+                        'age_hours': age_hours
+                    })
+            else:
+                stock_name = stock_mapper.get_company_name(summary.stock_code)
+                stale_stocks.append({
+                    'code': summary.stock_code,
+                    'name': stock_name or summary.stock_code,
+                    'age_hours': 999
+                })
+
+        # 나이순으로 정렬 (가장 오래된 것부터)
+        stale_stocks.sort(key=lambda x: x['age_hours'], reverse=True)
+
+        logger.info(f"총 {len(summaries)}개 종목 중 {len(stale_stocks)}개 업데이트 필요")
+
+        if not stale_stocks:
+            return {
+                "total_stocks": len(summaries),
+                "stale_stocks": 0,
+                "updated": 0,
+                "failed": 0,
+                "message": "모든 리포트가 최신 상태입니다."
+            }
+
+        # 순차적으로 업데이트
+        success_count = 0
+        fail_count = 0
+
+        for stock in stale_stocks:
+            try:
+                result = await update_stock_analysis_summary(
+                    stock['code'],
+                    db,
+                    force_update=True
+                )
+
+                if result:
+                    success_count += 1
+                    logger.info(f"✅ {stock['name']} ({stock['code']}) 업데이트 성공")
+                else:
+                    fail_count += 1
+                    logger.warning(f"❌ {stock['name']} ({stock['code']}) 업데이트 실패")
+
+                # API rate limit 고려
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                fail_count += 1
+                logger.error(f"❌ {stock['name']} ({stock['code']}) 오류: {e}")
+
+        logger.info(f"리포트 강제 업데이트 완료: 성공 {success_count}개, 실패 {fail_count}개")
+
+        return {
+            "total_stocks": len(summaries),
+            "stale_stocks": len(stale_stocks),
+            "updated": success_count,
+            "failed": fail_count,
+            "message": f"업데이트 완료: 성공 {success_count}개, 실패 {fail_count}개"
+        }
+
+    except Exception as e:
+        logger.error(f"리포트 강제 업데이트 실패: {e}", exc_info=True)
+        raise

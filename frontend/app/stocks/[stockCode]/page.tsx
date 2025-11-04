@@ -138,6 +138,9 @@ export default function StockDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedNews, setExpandedNews] = useState<number | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [abConfig, setAbConfig] = useState<{model_a: {name: string}, model_b: {name: string}} | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   // 예측 방향 변환
   const getDirectionInfo = (direction: string) => {
@@ -286,6 +289,23 @@ export default function StockDetailPage() {
     setIsMounted(true);
   }, []);
 
+  // A/B 설정 가져오기
+  useEffect(() => {
+    fetch("http://localhost:8000/api/ab-test/config")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.model_a && data.model_b) {
+          setAbConfig({
+            model_a: { name: data.model_a.name },
+            model_b: { name: data.model_b.name }
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch A/B config:", err);
+      });
+  }, []);
+
   useEffect(() => {
     if (!stockCode) return;
 
@@ -306,6 +326,54 @@ export default function StockDetailPage() {
         setLoading(false);
       });
   }, [stockCode]);
+
+  // 리포트 강제 업데이트 핸들러
+  const handleForceUpdate = async () => {
+    if (!stockCode) return;
+
+    setUpdating(true);
+    setUpdateMessage(null);
+
+    try {
+      const response = await fetch(`/api/reports/force-update/${stockCode}`, {
+        method: "POST",
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setUpdateMessage({
+          type: 'success',
+          text: result.message
+        });
+
+        // 데이터 새로고침
+        const stockResponse = await fetch(`/api/stocks/${stockCode}`);
+        if (stockResponse.ok) {
+          const stockData = await stockResponse.json();
+          setStock(stockData);
+        }
+      } else {
+        setUpdateMessage({
+          type: 'error',
+          text: result.message
+        });
+      }
+    } catch (error) {
+      console.error("Failed to update report:", error);
+      setUpdateMessage({
+        type: 'error',
+        text: "리포트 업데이트 중 오류가 발생했습니다."
+      });
+    } finally {
+      setUpdating(false);
+
+      // 5초 후 메시지 자동 제거
+      setTimeout(() => {
+        setUpdateMessage(null);
+      }, 5000);
+    }
+  };
 
   if (loading) {
     return (
@@ -396,32 +464,56 @@ export default function StockDetailPage() {
         {stock.analysis_summary && (
           <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-2xl shadow-2xl p-8 mb-6 border border-indigo-100">
             {/* 헤더 */}
-            <div className="flex items-center justify-between mb-8 pb-6 border-b-2 border-indigo-200">
-              <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-transparent flex items-center">
-                <span className="mr-3 text-3xl">🤖</span> AI 종합 투자 리포트
-                {stock.analysis_summary.ab_test_enabled && (
-                  <span className="ml-4 text-sm font-normal text-purple-600 bg-purple-100 px-3 py-1 rounded-full">
-                    A/B Testing
-                  </span>
-                )}
-              </h2>
+            <div className="mb-8 pb-6 border-b-2 border-indigo-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-transparent flex items-center">
+                  <span className="mr-3 text-3xl">🤖</span> AI 종합 투자 리포트
+                  {stock.analysis_summary.ab_test_enabled && (
+                    <span className="ml-4 text-sm font-normal text-purple-600 bg-purple-100 px-3 py-1 rounded-full">
+                      A/B Testing
+                    </span>
+                  )}
+                </h2>
+                <button
+                  onClick={handleForceUpdate}
+                  disabled={updating}
+                  className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${
+                    updating
+                      ? "bg-gray-400 cursor-not-allowed text-white"
+                      : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-md"
+                  }`}
+                >
+                  {updating ? "업데이트 중..." : "🔄 리포트 업데이트"}
+                </button>
+              </div>
+
+              {/* 업데이트 메시지 */}
+              {updateMessage && (
+                <div className={`mt-4 p-3 rounded-md ${
+                  updateMessage.type === 'success'
+                    ? 'bg-green-50 border border-green-200 text-green-800'
+                    : 'bg-red-50 border border-red-200 text-red-800'
+                }`}>
+                  <p className="text-sm font-medium">{updateMessage.text}</p>
+                </div>
+              )}
             </div>
 
             {/* A/B Test Mode: Side-by-side comparison */}
             {stock.analysis_summary.ab_test_enabled && stock.analysis_summary.model_a && stock.analysis_summary.model_b ? (
               <div className="flex gap-6">
-                {/* Model A (GPT-4o) */}
+                {/* Model A - Dynamic name from A/B config */}
                 {renderModelSummary(
                   stock.analysis_summary.model_a,
-                  "Model A (GPT-4o)",
+                  abConfig ? `Model A (${abConfig.model_a.name})` : "Model A",
                   "bg-blue-50",
                   "border-blue-200"
                 )}
 
-                {/* Model B (DeepSeek) */}
+                {/* Model B - Dynamic name from A/B config */}
                 {renderModelSummary(
                   stock.analysis_summary.model_b,
-                  "Model B (DeepSeek)",
+                  abConfig ? `Model B (${abConfig.model_b.name})` : "Model B",
                   "bg-green-50",
                   "border-green-200"
                 )}
@@ -557,12 +649,32 @@ export default function StockDetailPage() {
                 <div className="flex items-center justify-center text-sm text-gray-500">
                   <span className="mr-2">📊</span>
                   <span className="font-medium">분석 기준: {stock.analysis_summary.meta.based_on_prediction_count}건의 예측</span>
-                  {isMounted && stock.analysis_summary.meta.last_updated && (
-                    <>
-                      <span className="mx-2">|</span>
-                      <span>마지막 업데이트: {new Date(stock.analysis_summary.meta.last_updated).toLocaleString("ko-KR")}</span>
-                    </>
-                  )}
+                  {isMounted && stock.analysis_summary.meta.last_updated && (() => {
+                    const lastUpdated = new Date(stock.analysis_summary.meta.last_updated);
+                    const now = new Date();
+                    const diffMs = now.getTime() - lastUpdated.getTime();
+                    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+                    let timeAgo = '';
+                    if (diffHours > 0) {
+                      timeAgo = `${diffHours}시간 ${diffMinutes}분 전`;
+                    } else {
+                      timeAgo = `${diffMinutes}분 전`;
+                    }
+
+                    // 5시간 이상 지났으면 경고 스타일
+                    const isStale = diffHours >= 5;
+
+                    return (
+                      <>
+                        <span className="mx-2">|</span>
+                        <span className={isStale ? "font-bold text-orange-600" : ""}>
+                          🕐 리포트 생성: {lastUpdated.toLocaleString("ko-KR")} ({timeAgo})
+                        </span>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -575,12 +687,32 @@ export default function StockDetailPage() {
                 <div className="flex items-center justify-center text-sm text-gray-500">
                   <span className="mr-2">📊</span>
                   <span className="font-medium">분석 기준: {stock.analysis_summary.meta.based_on_prediction_count}건의 예측</span>
-                  {isMounted && stock.analysis_summary.meta.last_updated && (
-                    <>
-                      <span className="mx-2">|</span>
-                      <span>마지막 업데이트: {new Date(stock.analysis_summary.meta.last_updated).toLocaleString("ko-KR")}</span>
-                    </>
-                  )}
+                  {isMounted && stock.analysis_summary.meta.last_updated && (() => {
+                    const lastUpdated = new Date(stock.analysis_summary.meta.last_updated);
+                    const now = new Date();
+                    const diffMs = now.getTime() - lastUpdated.getTime();
+                    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+                    let timeAgo = '';
+                    if (diffHours > 0) {
+                      timeAgo = `${diffHours}시간 ${diffMinutes}분 전`;
+                    } else {
+                      timeAgo = `${diffMinutes}분 전`;
+                    }
+
+                    // 5시간 이상 지났으면 경고 스타일
+                    const isStale = diffHours >= 5;
+
+                    return (
+                      <>
+                        <span className="mx-2">|</span>
+                        <span className={isStale ? "font-bold text-orange-600" : ""}>
+                          🕐 리포트 생성: {lastUpdated.toLocaleString("ko-KR")} ({timeAgo})
+                        </span>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}

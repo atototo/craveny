@@ -319,8 +319,13 @@ def get_stock_analysis_summary(
         # A/B 테스트 활성화 시 custom_data에서 A/B 리포트 반환
         from backend.config import settings
         if settings.AB_TEST_ENABLED and summary.custom_data:
-            # custom_data에 A/B 리포트가 저장되어 있음
-            return summary.custom_data
+            # custom_data에 A/B 리포트가 저장되어 있음 + meta 정보 추가
+            result = dict(summary.custom_data)  # Copy to avoid modifying the original
+            result["meta"] = {
+                "last_updated": summary.last_updated.isoformat() if summary.last_updated else None,
+                "based_on_prediction_count": summary.based_on_prediction_count,
+            }
+            return result
         else:
             # 단일 모델 리포트 반환
             return {
