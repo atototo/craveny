@@ -14,9 +14,91 @@ from backend.db.models.stock_analysis import StockAnalysisSummary
 from backend.db.models.stock import StockPrice
 from backend.llm.investment_report import get_report_generator
 from backend.utils.stock_mapping import get_stock_mapper
+from backend.utils.market_time import (
+    get_market_phase,
+    get_ttl_hours,
+    get_price_threshold,
+    get_direction_threshold
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+async def should_update_report(
+    stock_code: str,
+    db: Session,
+    existing_summary: Optional[StockAnalysisSummary],
+    predictions: list,
+    current_price: Optional[Dict[str, Any]],
+    force_update: bool
+) -> tuple[bool, str]:
+    """
+    리포트 업데이트 필요 여부 판단 (시장 시간 기반)
+
+    Args:
+        stock_code: 종목 코드
+        db: Database session
+        existing_summary: 기존 요약 (None이면 신규 생성)
+        predictions: 최근 예측 리스트
+        current_price: 현재 주가 정보
+        force_update: 강제 업데이트 여부
+
+    Returns:
+        (업데이트 필요 여부, 사유)
+    """
+    if force_update or not existing_summary:
+        return True, "강제 업데이트 또는 리포트 없음"
+
+    market_phase = get_market_phase()
+    staleness_hours = (datetime.now() - existing_summary.last_updated).total_seconds() / 3600
+
+    # 트리거 1: 예측 개수 증가
+    total_prediction_count = (
+        db.query(func.count(Prediction.id))
+        .filter(Prediction.stock_code == stock_code)
+        .scalar()
+    )
+
+    if existing_summary.based_on_prediction_count < total_prediction_count:
+        return True, (
+            f"새 예측 추가 (기존: {existing_summary.based_on_prediction_count}, "
+            f"현재: {total_prediction_count}, 시장: {market_phase})"
+        )
+
+    # 트리거 2: 시장 시간 기반 TTL 초과
+    ttl_hours = get_ttl_hours(market_phase)
+    if staleness_hours >= ttl_hours:
+        return True, (
+            f"시장 단계별 TTL 초과 ({market_phase}: {staleness_hours:.1f}h > {ttl_hours}h)"
+        )
+
+    # 트리거 3: 주가 급변 (장중만)
+    if market_phase in ["market_open", "trading", "market_close"] and current_price:
+        price_threshold = get_price_threshold(market_phase)
+        price_change_rate = abs(current_price.get("change_rate", 0))
+
+        if price_change_rate >= price_threshold:
+            return True, (
+                f"주가 급변 ({price_change_rate:.1f}%, 임계값: {price_threshold}%, "
+                f"시장: {market_phase})"
+            )
+
+    # 트리거 4: 예측 방향 변화
+    if predictions:
+        current_up_ratio = sum(1 for p in predictions if p.direction == "up") / len(predictions)
+        report_up_ratio = existing_summary.up_count / existing_summary.total_predictions if existing_summary.total_predictions > 0 else 0
+
+        direction_threshold = get_direction_threshold(market_phase)
+        direction_change = abs(current_up_ratio - report_up_ratio)
+
+        if direction_change >= direction_threshold:
+            return True, (
+                f"예측 방향 급변 (상승 비율: {report_up_ratio:.1%} → {current_up_ratio:.1%}, "
+                f"변화: {direction_change:.1%}, 임계값: {direction_threshold:.1%}, 시장: {market_phase})"
+            )
+
+    return False, f"업데이트 불필요 (시장: {market_phase}, 경과: {staleness_hours:.1f}h/{ttl_hours}h)"
 
 
 async def update_stock_analysis_summary(
@@ -86,31 +168,16 @@ async def update_stock_analysis_summary(
             .first()
         )
 
-        # 4. 업데이트 필요 여부 확인
-        if not force_update and existing_summary:
-            # 총 예측 개수 조회 (limit 없이)
-            total_prediction_count = (
-                db.query(func.count(Prediction.id))
-                .filter(Prediction.stock_code == stock_code)
-                .scalar()
-            )
+        # 4. 업데이트 필요 여부 확인 (시장 시간 기반 다중 트리거)
+        should_update, reason = await should_update_report(
+            stock_code, db, existing_summary, predictions, current_price, force_update
+        )
 
-            # 예측 개수 증가 또는 24시간 경과 시 업데이트
-            staleness_hours = (datetime.now() - existing_summary.last_updated).total_seconds() / 3600
+        if not should_update:
+            logger.info(f"종목 {stock_code}의 분석 요약이 최신 상태입니다. ({reason})")
+            return existing_summary
 
-            if (existing_summary.based_on_prediction_count >= total_prediction_count
-                and staleness_hours < 24):
-                logger.info(
-                    f"종목 {stock_code}의 분석 요약이 최신 상태입니다. "
-                    f"(예측 건수: {total_prediction_count}, 경과 시간: {staleness_hours:.1f}시간)"
-                )
-                return existing_summary
-
-            logger.info(
-                f"종목 {stock_code} 업데이트 필요: "
-                f"예측 개수 변화 ({existing_summary.based_on_prediction_count} → {total_prediction_count}) "
-                f"또는 24시간 경과 ({staleness_hours:.1f}시간)"
-            )
+        logger.info(f"종목 {stock_code} 업데이트 시작: {reason}")
 
         # 5. LLM 리포트 생성
         logger.info(f"종목 {stock_code}에 대한 투자 리포트 생성 시작...")
