@@ -5,6 +5,7 @@ from sqlalchemy import Column, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.db.base import Base
+from backend.db.models.model import Model  # Import Model for relationship
 
 
 class ABTestConfig(Base):
@@ -22,14 +23,24 @@ class ABTestConfig(Base):
     __tablename__ = "ab_test_config"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    model_a_id = Column(Integer, ForeignKey("models.id"), nullable=False)
-    model_b_id = Column(Integer, ForeignKey("models.id"), nullable=False)
+    model_a_id = Column(Integer, nullable=False, index=True)  # FK 제거, 인덱스 유지
+    model_b_id = Column(Integer, nullable=False, index=True)  # FK 제거, 인덱스 유지
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
 
-    # Relationships
-    model_a = relationship("Model", foreign_keys=[model_a_id])
-    model_b = relationship("Model", foreign_keys=[model_b_id])
+    # Relationships (FK 없이 primaryjoin 사용)
+    model_a = relationship(
+        "Model",
+        foreign_keys=[model_a_id],
+        primaryjoin="ABTestConfig.model_a_id == Model.id",
+        viewonly=True
+    )
+    model_b = relationship(
+        "Model",
+        foreign_keys=[model_b_id],
+        primaryjoin="ABTestConfig.model_b_id == Model.id",
+        viewonly=True
+    )
 
     def __repr__(self) -> str:
         return (
