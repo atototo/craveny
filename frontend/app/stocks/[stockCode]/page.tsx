@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import NewsImpact from "../../components/NewsImpact";
 
 interface StockPrice {
   close: number;
@@ -40,9 +41,17 @@ interface RecentNews {
   published_at: string | null;
   notified_at: string | null;
   prediction?: {
-    direction: string;
-    confidence: number;
-    reasoning: string;
+    // Epic 3: New impact analysis fields
+    sentiment_direction?: string | null;
+    sentiment_score?: number | null;
+    impact_level?: string | null;
+    relevance_score?: number | null;
+    urgency_level?: string | null;
+    impact_analysis?: string | null;
+    reasoning?: string | null;
+    // Deprecated fields (backward compatibility)
+    direction?: string;
+    confidence?: number;
     short_term?: string;
     medium_term?: string;
     long_term?: string;
@@ -136,35 +145,10 @@ export default function StockDetailPage() {
   const [stock, setStock] = useState<StockDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedNews, setExpandedNews] = useState<number | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [abConfig, setAbConfig] = useState<{model_a: {name: string}, model_b: {name: string}} | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
-
-  // 예측 방향 변환
-  const getDirectionInfo = (direction: string) => {
-    const directionMap: { [key: string]: { text: string; color: string; icon: string } } = {
-      up: { text: "상승", color: "text-red-600", icon: "▲" },
-      down: { text: "하락", color: "text-blue-600", icon: "▼" },
-      hold: { text: "보합", color: "text-gray-600", icon: "━" },
-    };
-    return directionMap[direction] || directionMap.hold;
-  };
-
-  // 신뢰도 색상
-  const getConfidenceColor = (confidence: number | null | undefined) => {
-    if (!confidence) return "text-gray-600";
-    if (confidence >= 80) return "text-green-600";
-    if (confidence >= 60) return "text-yellow-600";
-    return "text-red-600";
-  };
-
-  // 퍼센트 포맷
-  const formatPercent = (value: number | null | undefined) => {
-    if (value === null || value === undefined) return "N/A";
-    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
-  };
 
   // 단일 모델 리포트 렌더링 함수
   const renderModelSummary = (
@@ -768,149 +752,14 @@ export default function StockDetailPage() {
                       )}
                     </div>
 
-                    {/* AI 예측 요약 */}
+                    {/* Epic 5: News Impact Display */}
                     {news.prediction && (
-                      <div className="mt-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className={`font-semibold ${getDirectionInfo(news.prediction.direction).color}`}>
-                            {getDirectionInfo(news.prediction.direction).icon} {getDirectionInfo(news.prediction.direction).text} 예측
-                          </span>
-                          <span className="text-sm text-gray-600">
-                            신뢰도 {(news.prediction.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => setExpandedNews(expandedNews === news.id ? null : news.id)}
-                          className="text-sm text-blue-600 hover:text-blue-800"
-                        >
-                          {expandedNews === news.id ? "접기 ▲" : "AI 분석 보기 ▼"}
-                        </button>
+                      <div className="mt-4">
+                        <NewsImpact prediction={news.prediction} />
                       </div>
                     )}
+
                   </div>
-
-                  {/* AI 상세 분석 (펼쳐지는 부분) - Phase 2 개선 */}
-                  {news.prediction && expandedNews === news.id && (
-                    <div className="p-4 bg-blue-50 border-t border-blue-100 space-y-4">
-                      {/* 기간별 예측 */}
-                      {(news.prediction.short_term || news.prediction.medium_term || news.prediction.long_term) && (
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800 mb-2">📅 기간별 예측</p>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-white p-3 rounded-md">
-                            {news.prediction.short_term && (
-                              <div>
-                                <div className="text-xs text-gray-500">단기 (T+1일)</div>
-                                <div className="text-sm font-medium text-gray-900">{news.prediction.short_term}</div>
-                              </div>
-                            )}
-                            {news.prediction.medium_term && (
-                              <div>
-                                <div className="text-xs text-gray-500">중기 (T+3일)</div>
-                                <div className="text-sm font-medium text-gray-900">{news.prediction.medium_term}</div>
-                              </div>
-                            )}
-                            {news.prediction.long_term && (
-                              <div>
-                                <div className="text-xs text-gray-500">장기 (T+5일)</div>
-                                <div className="text-sm font-medium text-gray-900">{news.prediction.long_term}</div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Phase 2: 신뢰도 구성 */}
-                      {news.prediction.confidence_breakdown && (
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800 mb-2">🔍 신뢰도 구성</p>
-                          <div className="bg-white p-3 rounded-md space-y-2">
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600">유사 뉴스 품질</span>
-                              <span className={`text-sm font-medium ${getConfidenceColor(news.prediction.confidence_breakdown.similar_news_quality)}`}>
-                                {news.prediction.confidence_breakdown.similar_news_quality ?? "N/A"}점
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600">패턴 일관성</span>
-                              <span className={`text-sm font-medium ${getConfidenceColor(news.prediction.confidence_breakdown.pattern_consistency)}`}>
-                                {news.prediction.confidence_breakdown.pattern_consistency ?? "N/A"}점
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600">공시 영향</span>
-                              <span className={`text-sm font-medium ${getConfidenceColor(news.prediction.confidence_breakdown.disclosure_impact)}`}>
-                                {news.prediction.confidence_breakdown.disclosure_impact ?? "N/A"}점
-                              </span>
-                            </div>
-                            {news.prediction.confidence_breakdown.explanation && (
-                              <div className="mt-2 pt-2 border-t border-gray-200">
-                                <span className="text-xs text-gray-500">{news.prediction.confidence_breakdown.explanation}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Phase 2: 패턴 분석 통계 */}
-                      {news.prediction.pattern_analysis && (
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800 mb-2">
-                            📊 유사 패턴 통계 (과거 {news.prediction.pattern_analysis.count ?? 0}건 분석)
-                          </p>
-                          <div className="bg-white p-3 rounded-md">
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                              {news.prediction.pattern_analysis.avg_1d !== null && news.prediction.pattern_analysis.avg_1d !== undefined && (
-                                <div>
-                                  <div className="text-xs text-gray-500">T+1일 평균</div>
-                                  <div className="text-sm font-medium">{formatPercent(news.prediction.pattern_analysis.avg_1d)}</div>
-                                </div>
-                              )}
-                              {news.prediction.pattern_analysis.avg_2d !== null && news.prediction.pattern_analysis.avg_2d !== undefined && (
-                                <div>
-                                  <div className="text-xs text-gray-500">T+2일 평균</div>
-                                  <div className="text-sm font-medium">{formatPercent(news.prediction.pattern_analysis.avg_2d)}</div>
-                                </div>
-                              )}
-                              {news.prediction.pattern_analysis.avg_3d !== null && news.prediction.pattern_analysis.avg_3d !== undefined && (
-                                <div>
-                                  <div className="text-xs text-gray-500">T+3일 평균</div>
-                                  <div className="text-sm font-medium">{formatPercent(news.prediction.pattern_analysis.avg_3d)}</div>
-                                </div>
-                              )}
-                              {news.prediction.pattern_analysis.avg_5d !== null && news.prediction.pattern_analysis.avg_5d !== undefined && (
-                                <div>
-                                  <div className="text-xs text-gray-500">T+5일 평균</div>
-                                  <div className="text-sm font-medium">{formatPercent(news.prediction.pattern_analysis.avg_5d)}</div>
-                                </div>
-                              )}
-                              {news.prediction.pattern_analysis.avg_10d !== null && news.prediction.pattern_analysis.avg_10d !== undefined && (
-                                <div>
-                                  <div className="text-xs text-gray-500">T+10일 평균</div>
-                                  <div className="text-sm font-medium">{formatPercent(news.prediction.pattern_analysis.avg_10d)}</div>
-                                </div>
-                              )}
-                              {news.prediction.pattern_analysis.avg_20d !== null && news.prediction.pattern_analysis.avg_20d !== undefined && (
-                                <div>
-                                  <div className="text-xs text-gray-500">T+20일 평균</div>
-                                  <div className="text-sm font-medium">{formatPercent(news.prediction.pattern_analysis.avg_20d)}</div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* AI 판단 근거 */}
-                      <div>
-                        <p className="text-sm font-semibold text-gray-800 mb-2">🤖 AI 판단 근거</p>
-                        <div className="bg-white p-3 rounded-md">
-                          <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
-                            {news.prediction.reasoning}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>

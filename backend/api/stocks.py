@@ -486,12 +486,20 @@ async def get_stock_detail(
                 "notified_at": news.notified_at.isoformat() if news.notified_at else None,
             }
 
-            # 예측 정보가 있으면 추가 (Phase 2: 기간별 예측, 신뢰도 breakdown, 패턴 분석 포함)
+            # 예측 정보가 있으면 추가 (Epic 3: 영향도 분석 필드 추가)
             if prediction:
                 news_data["prediction"] = {
+                    # Epic 3: 새로운 영향도 분석 필드
+                    "sentiment_direction": prediction.sentiment_direction,
+                    "sentiment_score": prediction.sentiment_score,
+                    "impact_level": prediction.impact_level,
+                    "relevance_score": prediction.relevance_score,
+                    "urgency_level": prediction.urgency_level,
+                    "impact_analysis": prediction.impact_analysis,
+                    "reasoning": prediction.reasoning,
+                    # Deprecated 필드 (하위 호환성)
                     "direction": prediction.direction,
                     "confidence": prediction.confidence,
-                    "reasoning": prediction.reasoning,
                     "short_term": prediction.short_term,
                     "medium_term": prediction.medium_term,
                     "long_term": prediction.long_term,

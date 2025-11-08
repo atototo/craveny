@@ -259,7 +259,10 @@ async def toggle_model_status(model_id: int):
 @router.delete("/models/{model_id}", status_code=204)
 async def delete_model(model_id: int):
     """
-    모델 삭제
+    모델 삭제 (애플리케이션 레벨 무결성 검증)
+
+    FK 제약조건 없이 애플리케이션에서 데이터 무결성을 관리합니다.
+    삭제 전 영향도를 분석하고 명시적으로 로깅합니다.
 
     Args:
         model_id: 모델 ID
@@ -273,22 +276,63 @@ async def delete_model(model_id: int):
         if not model:
             raise HTTPException(status_code=404, detail=f"모델 ID {model_id} 없음")
 
-        # 삭제 전 A/B 설정 확인
+        logger.info("=" * 80)
+        logger.info(f"🗑️ 모델 삭제 요청: {model.name} (ID: {model_id})")
+        logger.info("=" * 80)
+
+        # ==================== 무결성 검증 ====================
         from backend.db.models.ab_test_config import ABTestConfig
-        ab_configs = db.query(ABTestConfig).filter(
+        from backend.db.models.prediction import Prediction
+
+        # 1. 활성화된 A/B 설정 확인 (삭제 차단)
+        active_ab_configs = db.query(ABTestConfig).filter(
+            ABTestConfig.is_active == True,
             (ABTestConfig.model_a_id == model_id) | (ABTestConfig.model_b_id == model_id)
         ).all()
 
-        if ab_configs:
+        if active_ab_configs:
+            logger.warning(f"⚠️ 활성 A/B 테스트에서 사용 중: {len(active_ab_configs)}개 설정")
             raise HTTPException(
                 status_code=400,
-                detail=f"이 모델은 A/B 테스트 설정에서 사용 중입니다. 먼저 A/B 설정을 변경하세요."
+                detail=f"이 모델은 현재 활성화된 A/B 테스트에서 사용 중입니다. 먼저 A/B 설정을 변경하세요."
             )
 
+        # 2. 영향도 분석
+        inactive_ab_configs = db.query(ABTestConfig).filter(
+            ABTestConfig.is_active == False,
+            (ABTestConfig.model_a_id == model_id) | (ABTestConfig.model_b_id == model_id)
+        ).all()
+
+        predictions = db.query(Prediction).filter(Prediction.model_id == model_id).all()
+
+        logger.info(f"\n📊 삭제 영향도 분석:")
+        logger.info(f"  - 비활성 A/B 설정: {len(inactive_ab_configs)}개")
+        logger.info(f"  - 예측 데이터: {len(predictions)}개")
+        logger.info(f"  - 총 삭제 대상: {len(inactive_ab_configs) + len(predictions) + 1}개 레코드")
+
+        # ==================== 연쇄 삭제 ====================
+
+        # 3. 비활성화된 A/B 설정 삭제
+        if inactive_ab_configs:
+            logger.info(f"\n🔄 비활성 A/B 설정 {len(inactive_ab_configs)}개 삭제 중...")
+            for config in inactive_ab_configs:
+                db.delete(config)
+                logger.info(f"  ✅ A/B 설정 삭제: ID {config.id}")
+
+        # 4. 예측 데이터 삭제
+        if predictions:
+            logger.info(f"\n🔄 예측 데이터 {len(predictions)}개 삭제 중...")
+            # 효율성을 위해 bulk delete 사용
+            db.query(Prediction).filter(Prediction.model_id == model_id).delete()
+            logger.info(f"  ✅ 예측 데이터 {len(predictions)}개 삭제 완료")
+
+        # 5. 모델 삭제
+        logger.info(f"\n🗑️ 모델 '{model.name}' 삭제 중...")
         db.delete(model)
         db.commit()
 
-        logger.info(f"✅ 모델 삭제 완료: {model.name}")
+        logger.info(f"\n✅ 모델 삭제 완료: {model.name}")
+        logger.info("=" * 80)
         return None
 
     except HTTPException:
@@ -296,7 +340,7 @@ async def delete_model(model_id: int):
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"모델 삭제 실패: {e}", exc_info=True)
+        logger.error(f"\n❌ 모델 삭제 실패: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"모델 삭제 실패: {str(e)}")
     finally:
         db.close()

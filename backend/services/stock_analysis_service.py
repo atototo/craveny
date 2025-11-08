@@ -205,11 +205,26 @@ async def update_stock_analysis_summary(
 
         # 7. A/B 테스트 활성화 시 전체 report를 JSON으로 저장
         if settings.AB_TEST_ENABLED:
+            # A/B 리포트에서 가격 정보 추출 (Model A 기준)
+            price_targets = {}
+            if report and "model_a" in report:
+                price_targets = report["model_a"].get("price_targets", {})
+
             # A/B 리포트 전체를 JSON 필드에 저장 (analysis_summary_a, analysis_summary_b)
             if existing_summary:
                 # custom_data 필드에 A/B 리포트 저장
                 existing_summary.custom_data = report
                 existing_summary.overall_summary = "A/B 테스트 활성화 (Model A/B 비교 리포트)"
+
+                # 구조화된 가격 데이터 저장
+                if price_targets:
+                    existing_summary.base_price = price_targets.get("base_price")
+                    existing_summary.short_term_target_price = price_targets.get("short_term_target")
+                    existing_summary.short_term_support_price = price_targets.get("short_term_support")
+                    existing_summary.medium_term_target_price = price_targets.get("medium_term_target")
+                    existing_summary.medium_term_support_price = price_targets.get("medium_term_support")
+                    existing_summary.long_term_target_price = price_targets.get("long_term_target")
+
                 existing_summary.total_predictions = total_predictions
                 existing_summary.up_count = up_count
                 existing_summary.down_count = down_count
@@ -224,6 +239,15 @@ async def update_stock_analysis_summary(
                     stock_code=stock_code,
                     overall_summary="A/B 테스트 활성화 (Model A/B 비교 리포트)",
                     custom_data=report,
+
+                    # 구조화된 가격 데이터
+                    base_price=price_targets.get("base_price") if price_targets else None,
+                    short_term_target_price=price_targets.get("short_term_target") if price_targets else None,
+                    short_term_support_price=price_targets.get("short_term_support") if price_targets else None,
+                    medium_term_target_price=price_targets.get("medium_term_target") if price_targets else None,
+                    medium_term_support_price=price_targets.get("medium_term_support") if price_targets else None,
+                    long_term_target_price=price_targets.get("long_term_target") if price_targets else None,
+
                     total_predictions=total_predictions,
                     up_count=up_count,
                     down_count=down_count,
@@ -246,6 +270,16 @@ async def update_stock_analysis_summary(
                 existing_summary.opportunity_factors = report.get("opportunity_factors", [])
                 existing_summary.recommendation = report.get("recommendation")
 
+                # 구조화된 가격 데이터 저장
+                price_targets = report.get("price_targets", {})
+                if price_targets:
+                    existing_summary.base_price = price_targets.get("base_price")
+                    existing_summary.short_term_target_price = price_targets.get("short_term_target")
+                    existing_summary.short_term_support_price = price_targets.get("short_term_support")
+                    existing_summary.medium_term_target_price = price_targets.get("medium_term_target")
+                    existing_summary.medium_term_support_price = price_targets.get("medium_term_support")
+                    existing_summary.long_term_target_price = price_targets.get("long_term_target")
+
                 existing_summary.total_predictions = total_predictions
                 existing_summary.up_count = up_count
                 existing_summary.down_count = down_count
@@ -259,6 +293,7 @@ async def update_stock_analysis_summary(
                 logger.info(f"종목 {stock_code}의 분석 요약 업데이트 완료")
             else:
                 # 신규 생성
+                price_targets = report.get("price_targets", {})
                 summary = StockAnalysisSummary(
                     stock_code=stock_code,
                     overall_summary=report.get("overall_summary"),
@@ -269,17 +304,25 @@ async def update_stock_analysis_summary(
                     opportunity_factors=report.get("opportunity_factors", []),
                     recommendation=report.get("recommendation"),
 
-                total_predictions=total_predictions,
-                up_count=up_count,
-                down_count=down_count,
-                hold_count=hold_count,
-                avg_confidence=avg_confidence,
+                    # 구조화된 가격 데이터
+                    base_price=price_targets.get("base_price") if price_targets else None,
+                    short_term_target_price=price_targets.get("short_term_target") if price_targets else None,
+                    short_term_support_price=price_targets.get("short_term_support") if price_targets else None,
+                    medium_term_target_price=price_targets.get("medium_term_target") if price_targets else None,
+                    medium_term_support_price=price_targets.get("medium_term_support") if price_targets else None,
+                    long_term_target_price=price_targets.get("long_term_target") if price_targets else None,
 
-                last_updated=datetime.now(),
-                based_on_prediction_count=total_predictions,
-            )
-            db.add(summary)
-            logger.info(f"종목 {stock_code}의 분석 요약 신규 생성 완료")
+                    total_predictions=total_predictions,
+                    up_count=up_count,
+                    down_count=down_count,
+                    hold_count=hold_count,
+                    avg_confidence=avg_confidence,
+
+                    last_updated=datetime.now(),
+                    based_on_prediction_count=total_predictions,
+                )
+                db.add(summary)
+                logger.info(f"종목 {stock_code}의 분석 요약 신규 생성 완료")
 
         db.commit()
         db.refresh(summary)

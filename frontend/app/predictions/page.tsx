@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
+import NewsImpact from "../components/NewsImpact";
 
 interface PriceChange {
   day1?: number | null;
@@ -32,16 +33,24 @@ interface PatternAnalysis {
 }
 
 interface PredictionDetail {
-  prediction: string;
-  confidence: number;
-  reasoning: string;
-  short_term: string;
-  medium_term: string;
-  long_term: string;
+  // Epic 3: New impact analysis fields
+  sentiment_direction?: string | null;
+  sentiment_score?: number | null;
+  impact_level?: string | null;
+  relevance_score?: number | null;
+  urgency_level?: string | null;
+  impact_analysis?: string | null;
+  reasoning?: string | null;
+  // Deprecated fields (backward compatibility)
+  prediction?: string;
+  confidence?: number;
+  short_term?: string;
+  medium_term?: string;
+  long_term?: string;
   confidence_breakdown?: ConfidenceBreakdown | null;
   pattern_analysis?: PatternAnalysis | null;
-  model: string;
-  timestamp: string;
+  model?: string;
+  timestamp?: string;
 }
 
 interface News {
@@ -56,6 +65,7 @@ interface News {
   prediction_direction: string | null;
   prediction_confidence: number | null;
   prediction_detail?: PredictionDetail | null;
+  prediction?: PredictionDetail | null; // Epic 3: Full prediction data
 }
 
 interface NewsResponse {
@@ -221,10 +231,17 @@ export default function PredictionsPage() {
                           <span>{news.title}</span>
                         )}
                       </h3>
-                      <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
                         <span>📰 {news.source}</span>
                         <span>🕐 {format(new Date(news.created_at), "yyyy-MM-dd HH:mm")}</span>
                       </div>
+
+                      {/* Epic 5: News Impact Display */}
+                      {(news.prediction || news.prediction_detail) && (
+                        <div className="mt-4">
+                          <NewsImpact prediction={news.prediction || news.prediction_detail} />
+                        </div>
+                      )}
                     </div>
                     {news.stock_code && (
                       <a

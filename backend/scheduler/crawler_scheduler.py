@@ -17,6 +17,7 @@ from backend.crawlers.naver_search_crawler import NaverNewsSearchCrawler
 from backend.crawlers.dart_crawler import DartCrawler
 from backend.crawlers.news_saver import NewsSaver
 from backend.crawlers.stock_crawler import get_stock_crawler
+from backend.crawlers.index_crawler import IndexCrawler
 from backend.crawlers.news_stock_matcher import run_daily_matching
 from backend.llm.embedder import run_daily_embedding
 from backend.utils.market_time import is_market_open
@@ -71,6 +72,12 @@ class CrawlerScheduler:
         self.notify_total_processed = 0
         self.notify_total_success = 0
         self.notify_total_failed = 0
+
+        # 지수 크롤링 통계
+        self.index_total_runs = 0
+        self.index_total_market = 0
+        self.index_total_sector = 0
+        self.index_total_errors = 0
 
     def _crawl_all_sources(self) -> None:
         """
@@ -499,6 +506,45 @@ class CrawlerScheduler:
         finally:
             db.close()
 
+    def _collect_indices(self) -> None:
+        """
+        시장 지수 및 섹터 지수를 수집합니다.
+        매일 장 마감 후(16:30)에 실행됩니다.
+        """
+        logger.info("=" * 60)
+        logger.info(f"📊 지수 데이터 수집 시작 (#{self.index_total_runs + 1})")
+        logger.info("=" * 60)
+
+        try:
+            # IndexCrawler로 시장 + 섹터 지수 수집
+            crawler = IndexCrawler()
+            results = crawler.collect_all_indices(days=30)
+
+            # 통계 계산
+            market_saved = sum(results["market"].values())
+            sector_saved = sum(results["sector"].values())
+
+            # 통계 업데이트
+            self.index_total_runs += 1
+            self.index_total_market += market_saved
+            self.index_total_sector += sector_saved
+
+            logger.info("=" * 60)
+            logger.info(
+                f"✅ 지수 수집 완료: 시장 {market_saved}건, 섹터 {sector_saved}건"
+            )
+            logger.info(
+                f"📊 지수 전체 통계: 실행 {self.index_total_runs}회, "
+                f"시장 {self.index_total_market}건, "
+                f"섹터 {self.index_total_sector}건, "
+                f"에러 {self.index_total_errors}회"
+            )
+            logger.info("=" * 60)
+
+        except Exception as e:
+            self.index_total_errors += 1
+            logger.error(f"❌ 지수 수집 중 예상치 못한 에러: {e}")
+
     def start(self) -> None:
         """스케줄러를 시작합니다."""
         if self.is_running:
@@ -582,6 +628,16 @@ class CrawlerScheduler:
             replace_existing=True,
         )
 
+        # 지수 수집 작업 등록 (매일 16:30)
+        index_trigger = CronTrigger(hour=16, minute=30)
+        self.scheduler.add_job(
+            func=self._collect_indices,
+            trigger=index_trigger,
+            id="index_collector_job",
+            name="지수 수집기",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         self.is_running = True
 
@@ -591,6 +647,7 @@ class CrawlerScheduler:
         logger.info("   - 종목별 검색: 10분마다")
         logger.info("   - DART 공시: 5분마다")
         logger.info("   - 주가 수집: 1분마다 (장 시간)")
+        logger.info("   - 지수 수집: 매일 16:30 (장 마감 후)")
 
         # 초기 실행은 선택사항 (환경 변수로 제어)
         # 첫 스케줄까지 기다리는 것이 서버 시작을 빠르게 합니다
@@ -657,6 +714,13 @@ class CrawlerScheduler:
             else 0
         )
 
+        # 지수 성공률
+        index_success_rate = (
+            (self.index_total_runs - self.index_total_errors) / self.index_total_runs * 100
+            if self.index_total_runs > 0
+            else 0
+        )
+
         return {
             "news": {
                 "total_crawls": self.news_total_crawls,
@@ -683,6 +747,13 @@ class CrawlerScheduler:
                 "total_success": self.embedding_total_success,
                 "total_fail": self.embedding_total_fail,
                 "success_rate": round(embedding_success_rate, 2),
+            },
+            "index": {
+                "total_runs": self.index_total_runs,
+                "total_market": self.index_total_market,
+                "total_sector": self.index_total_sector,
+                "total_errors": self.index_total_errors,
+                "success_rate": round(index_success_rate, 2),
             },
             "is_running": self.is_running,
         }

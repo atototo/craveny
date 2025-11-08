@@ -131,28 +131,43 @@ class StockPredictor:
                 Prediction.model_id == model_id
             ).first()
 
-            # prediction_data에서 필드 추출
-            direction = prediction_data.get("direction", "hold")
-            confidence = prediction_data.get("confidence", 0.5)
+            # prediction_data에서 새 필드 추출
+            sentiment_direction = prediction_data.get("sentiment_direction", "neutral")
+            sentiment_score = prediction_data.get("sentiment_score", 0.0)
+            impact_level = prediction_data.get("impact_level", "low")
+            relevance_score = prediction_data.get("relevance_score", 0.0)
+            urgency_level = prediction_data.get("urgency_level", "routine")
+            impact_analysis = prediction_data.get("impact_analysis", {})
             reasoning = prediction_data.get("reasoning", "")
             current_price = prediction_data.get("current_price")
-            short_term = prediction_data.get("short_term")
-            medium_term = prediction_data.get("medium_term")
-            long_term = prediction_data.get("long_term")
-            confidence_breakdown = prediction_data.get("confidence_breakdown")
-            pattern_analysis = prediction_data.get("pattern_analysis")
+            pattern_analysis = prediction_data.get("pattern_analysis", {})
+
+            # Deprecated 필드는 None으로 설정
+            direction = None
+            confidence = None
+            short_term = None
+            medium_term = None
+            long_term = None
+            confidence_breakdown = None
 
             if existing:
                 # UPDATE
-                existing.direction = direction
-                existing.confidence = confidence
+                existing.sentiment_direction = sentiment_direction
+                existing.sentiment_score = sentiment_score
+                existing.impact_level = impact_level
+                existing.relevance_score = relevance_score
+                existing.urgency_level = urgency_level
+                existing.impact_analysis = impact_analysis
                 existing.reasoning = reasoning
                 existing.current_price = current_price
-                existing.short_term = short_term
-                existing.medium_term = medium_term
-                existing.long_term = long_term
-                existing.confidence_breakdown = confidence_breakdown
                 existing.pattern_analysis = pattern_analysis
+                # Deprecated 필드는 None으로
+                existing.direction = None
+                existing.confidence = None
+                existing.short_term = None
+                existing.medium_term = None
+                existing.long_term = None
+                existing.confidence_breakdown = None
                 existing.created_at = datetime.now()
             else:
                 # INSERT
@@ -160,20 +175,32 @@ class StockPredictor:
                     news_id=news_id,
                     model_id=model_id,
                     stock_code=stock_code,
-                    direction=direction,
-                    confidence=confidence,
+                    # 새 필드
+                    sentiment_direction=sentiment_direction,
+                    sentiment_score=sentiment_score,
+                    impact_level=impact_level,
+                    relevance_score=relevance_score,
+                    urgency_level=urgency_level,
+                    impact_analysis=impact_analysis,
                     reasoning=reasoning,
                     current_price=current_price,
-                    short_term=short_term,
-                    medium_term=medium_term,
-                    long_term=long_term,
-                    confidence_breakdown=confidence_breakdown,
                     pattern_analysis=pattern_analysis,
+                    # Deprecated 필드는 None
+                    direction=None,
+                    confidence=None,
+                    short_term=None,
+                    medium_term=None,
+                    long_term=None,
+                    confidence_breakdown=None,
                 )
                 db.add(new_prediction)
 
             db.commit()
-            logger.debug(f"모델 {model_id} 예측 저장 완료: news_id={news_id}, direction={direction}, confidence={confidence:.2f}")
+            logger.debug(
+                f"모델 {model_id} 영향도 분석 저장 완료: news_id={news_id}, "
+                f"sentiment={sentiment_direction} ({sentiment_score:.2f}), "
+                f"impact={impact_level}, relevance={relevance_score:.2f}"
+            )
 
         except Exception as e:
             logger.error(f"모델 예측 저장 실패 (news_id={news_id}, model_id={model_id}): {e}", exc_info=True)
@@ -421,6 +448,324 @@ class StockPredictor:
         finally:
             db.close()
 
+    def _get_sector_indices(self, top_n: int = 5) -> Dict[str, Any]:
+        """
+        섹터별 지수 정보 조회 (변동률 상위/하위)
+
+        Args:
+            top_n: 상위/하위 각각 조회할 섹터 수
+
+        Returns:
+            섹터 지수 정보 딕셔너리
+        """
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text
+
+            # 최신 날짜의 섹터 지수 조회 (변동률 기준 정렬)
+            result = db.execute(
+                text("""
+                    WITH latest_date AS (
+                        SELECT MAX(date) as max_date FROM sector_indices
+                    )
+                    SELECT
+                        sector_name,
+                        close,
+                        change_pct
+                    FROM sector_indices
+                    WHERE date = (SELECT max_date FROM latest_date)
+                    AND change_pct IS NOT NULL
+                    ORDER BY change_pct DESC
+                """)
+            )
+            all_sectors = result.fetchall()
+
+            if not all_sectors or len(all_sectors) == 0:
+                logger.warning("섹터 지수 데이터 없음")
+                return {"top_sectors": [], "bottom_sectors": []}
+
+            # 상위 N개
+            top_sectors = [
+                {
+                    "name": row[0],
+                    "close": round(row[1], 2),
+                    "change_pct": round(row[2], 2)
+                }
+                for row in all_sectors[:top_n]
+            ]
+
+            # 하위 N개
+            bottom_sectors = [
+                {
+                    "name": row[0],
+                    "close": round(row[1], 2),
+                    "change_pct": round(row[2], 2)
+                }
+                for row in all_sectors[-top_n:]
+            ]
+
+            return {
+                "top_sectors": top_sectors,
+                "bottom_sectors": bottom_sectors
+            }
+
+        except Exception as e:
+            logger.error(f"섹터 지수 조회 실패: {e}")
+            return {"top_sectors": [], "bottom_sectors": []}
+        finally:
+            db.close()
+
+    def _get_technical_indicators(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        """
+        기술적 지표를 계산합니다.
+
+        Args:
+            stock_code: 종목 코드
+
+        Returns:
+            기술적 지표 딕셔너리 또는 None
+            {
+                "moving_averages": {
+                    "ma5": float,
+                    "ma20": float,
+                    "ma60": float,
+                    "current_vs_ma5": float,  # 현재가 대비 %
+                    "current_vs_ma20": float,
+                    "current_vs_ma60": float,
+                    "trend": str  # "강세", "중립", "약세"
+                },
+                "volume_analysis": {
+                    "current_volume": int,
+                    "avg_volume_20d": float,
+                    "volume_ratio": float,  # 평균 대비 %
+                    "trend": str  # "급증", "보통", "저조"
+                },
+                "price_momentum": {
+                    "change_1d": float,  # %
+                    "change_5d": float,
+                    "change_20d": float,
+                    "trend": str  # "상승세", "보합", "하락세"
+                }
+            }
+        """
+        db = SessionLocal()
+        try:
+            # 최근 60일치 데이터 조회 (MA60 계산용)
+            recent_prices = (
+                db.query(StockPrice)
+                .filter(StockPrice.stock_code == stock_code)
+                .order_by(StockPrice.date.desc())
+                .limit(60)
+                .all()
+            )
+
+            if len(recent_prices) < 5:
+                logger.warning(f"기술적 지표 계산 불가: {stock_code} - 데이터 부족 ({len(recent_prices)}일)")
+                return None
+
+            # 최신 데이터가 먼저 오므로 역순 정렬
+            recent_prices.reverse()
+
+            current_price = recent_prices[-1].close
+            current_volume = recent_prices[-1].volume or 0
+
+            # 1. 이동평균선 계산
+            ma5 = sum(p.close for p in recent_prices[-5:]) / 5 if len(recent_prices) >= 5 else None
+            ma20 = sum(p.close for p in recent_prices[-20:]) / 20 if len(recent_prices) >= 20 else None
+            ma60 = sum(p.close for p in recent_prices[-60:]) / 60 if len(recent_prices) >= 60 else None
+
+            # 현재가 vs 이동평균 비율
+            ma5_diff = ((current_price - ma5) / ma5 * 100) if ma5 else None
+            ma20_diff = ((current_price - ma20) / ma20 * 100) if ma20 else None
+            ma60_diff = ((current_price - ma60) / ma60 * 100) if ma60 else None
+
+            # 추세 판단 (정배열: 강세, 역배열: 약세)
+            ma_trend = "중립"
+            if ma5 and ma20 and ma60:
+                if ma5 > ma20 > ma60 and current_price > ma5:
+                    ma_trend = "강세"
+                elif ma5 < ma20 < ma60 and current_price < ma5:
+                    ma_trend = "약세"
+
+            # 2. 거래량 분석
+            volumes = [p.volume for p in recent_prices[-20:] if p.volume]
+            avg_volume_20d = sum(volumes) / len(volumes) if volumes else 0
+            volume_ratio = ((current_volume - avg_volume_20d) / avg_volume_20d * 100) if avg_volume_20d > 0 else 0
+
+            volume_trend = "보통"
+            if volume_ratio > 50:
+                volume_trend = "급증"
+            elif volume_ratio < -30:
+                volume_trend = "저조"
+
+            # 3. 가격 모멘텀
+            change_1d = 0.0
+            change_5d = 0.0
+            change_20d = 0.0
+
+            if len(recent_prices) >= 2:
+                change_1d = ((current_price - recent_prices[-2].close) / recent_prices[-2].close * 100)
+
+            if len(recent_prices) >= 6:
+                change_5d = ((current_price - recent_prices[-6].close) / recent_prices[-6].close * 100)
+
+            if len(recent_prices) >= 21:
+                change_20d = ((current_price - recent_prices[-21].close) / recent_prices[-21].close * 100)
+
+            # 모멘텀 추세 판단
+            momentum_trend = "보합"
+            if change_1d > 0 and change_5d > 0 and change_20d > 0:
+                momentum_trend = "상승세"
+            elif change_1d < 0 and change_5d < 0 and change_20d < 0:
+                momentum_trend = "하락세"
+
+            # 4. RSI (14일 기준)
+            rsi = None
+            rsi_signal = "중립"
+            if len(recent_prices) >= 15:
+                # RSI 계산: 14일간의 상승/하락 평균
+                gains = []
+                losses = []
+                for i in range(-14, 0):
+                    change = recent_prices[i].close - recent_prices[i-1].close
+                    if change > 0:
+                        gains.append(change)
+                        losses.append(0)
+                    else:
+                        gains.append(0)
+                        losses.append(abs(change))
+
+                avg_gain = sum(gains) / 14
+                avg_loss = sum(losses) / 14
+
+                if avg_loss == 0:
+                    rsi = 100
+                else:
+                    rs = avg_gain / avg_loss
+                    rsi = 100 - (100 / (1 + rs))
+
+                # RSI 신호 판단
+                if rsi >= 70:
+                    rsi_signal = "과매수"
+                elif rsi <= 30:
+                    rsi_signal = "과매도"
+
+            # 5. 볼린저 밴드 (20일 기준, 2 표준편차)
+            bb_upper = None
+            bb_middle = None
+            bb_lower = None
+            bb_position = "중립"
+            if len(recent_prices) >= 20 and ma20:
+                # 표준편차 계산
+                prices_20d = [p.close for p in recent_prices[-20:]]
+                variance = sum((p - ma20) ** 2 for p in prices_20d) / 20
+                std_dev = variance ** 0.5
+
+                bb_upper = ma20 + (2 * std_dev)
+                bb_middle = ma20
+                bb_lower = ma20 - (2 * std_dev)
+
+                # 현재가 위치 판단
+                if current_price >= bb_upper:
+                    bb_position = "상단돌파"
+                elif current_price <= bb_lower:
+                    bb_position = "하단돌파"
+                elif current_price > bb_middle:
+                    bb_position = "상단근접"
+                else:
+                    bb_position = "하단근접"
+
+            # 6. MACD (12일, 26일, 9일 신호선)
+            macd_line = None
+            macd_signal = None
+            macd_histogram = None
+            macd_trend = "중립"
+            if len(recent_prices) >= 26:
+                # EMA 계산 헬퍼 함수
+                def calculate_ema(prices, period):
+                    multiplier = 2 / (period + 1)
+                    ema = prices[0]
+                    for price in prices[1:]:
+                        ema = (price - ema) * multiplier + ema
+                    return ema
+
+                prices = [p.close for p in recent_prices]
+
+                # 12일 EMA
+                ema12 = calculate_ema(prices[-26:], 12)
+
+                # 26일 EMA
+                ema26 = calculate_ema(prices[-26:], 26)
+
+                # MACD Line
+                macd_line = ema12 - ema26
+
+                # Signal Line (MACD의 9일 EMA)
+                if len(recent_prices) >= 35:
+                    macd_values = []
+                    for i in range(-35, 0):
+                        prices_segment = [p.close for p in recent_prices[max(0, i-25):i+1]]
+                        if len(prices_segment) >= 26:
+                            e12 = calculate_ema(prices_segment[-26:], 12)
+                            e26 = calculate_ema(prices_segment[-26:], 26)
+                            macd_values.append(e12 - e26)
+
+                    if len(macd_values) >= 9:
+                        macd_signal = calculate_ema(macd_values[-9:], 9)
+                        macd_histogram = macd_line - macd_signal
+
+                        # MACD 신호 판단
+                        if macd_histogram > 0:
+                            macd_trend = "매수신호"
+                        elif macd_histogram < 0:
+                            macd_trend = "매도신호"
+
+            return {
+                "moving_averages": {
+                    "ma5": round(ma5, 2) if ma5 else None,
+                    "ma20": round(ma20, 2) if ma20 else None,
+                    "ma60": round(ma60, 2) if ma60 else None,
+                    "current_vs_ma5": round(ma5_diff, 2) if ma5_diff else None,
+                    "current_vs_ma20": round(ma20_diff, 2) if ma20_diff else None,
+                    "current_vs_ma60": round(ma60_diff, 2) if ma60_diff else None,
+                    "trend": ma_trend,
+                },
+                "volume_analysis": {
+                    "current_volume": current_volume,
+                    "avg_volume_20d": round(avg_volume_20d, 0) if avg_volume_20d else 0,
+                    "volume_ratio": round(volume_ratio, 2),
+                    "trend": volume_trend,
+                },
+                "price_momentum": {
+                    "change_1d": round(change_1d, 2),
+                    "change_5d": round(change_5d, 2),
+                    "change_20d": round(change_20d, 2),
+                    "trend": momentum_trend,
+                },
+                "rsi": {
+                    "value": round(rsi, 2) if rsi else None,
+                    "signal": rsi_signal,
+                },
+                "bollinger_bands": {
+                    "upper": round(bb_upper, 2) if bb_upper else None,
+                    "middle": round(bb_middle, 2) if bb_middle else None,
+                    "lower": round(bb_lower, 2) if bb_lower else None,
+                    "position": bb_position,
+                },
+                "macd": {
+                    "macd_line": round(macd_line, 2) if macd_line else None,
+                    "signal_line": round(macd_signal, 2) if macd_signal else None,
+                    "histogram": round(macd_histogram, 2) if macd_histogram else None,
+                    "trend": macd_trend,
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"기술적 지표 계산 실패 (종목코드: {stock_code}): {e}")
+            return None
+        finally:
+            db.close()
+
     def _calculate_similar_news_stats(self, similar_news: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         유사 뉴스 패턴 통계를 계산합니다.
@@ -531,6 +876,9 @@ class StockPredictor:
         # 5. 현재 주가 정보 조회
         stock_price = self._get_current_stock_info(stock_code) if stock_code else None
 
+        # 5-1. 기술적 지표 조회
+        technical = self._get_technical_indicators(stock_code) if stock_code else None
+
         # 6. 현재 주가 정보 섹션
         if stock_price:
             change_indicator = "📈" if stock_price["change_rate"] > 0 else "📉" if stock_price["change_rate"] < 0 else "➡️"
@@ -546,6 +894,194 @@ class StockPredictor:
 """
         else:
             price_section = "\n## 현재 주가 정보\n현재 주가 정보 없음\n"
+
+        # 6-1. 기술적 지표 섹션
+        if technical:
+            ma = technical["moving_averages"]
+            vol = technical["volume_analysis"]
+            mom = technical["price_momentum"]
+
+            ma_indicator = "📈" if ma["trend"] == "강세" else "📉" if ma["trend"] == "약세" else "➡️"
+            vol_indicator = "🔥" if vol["trend"] == "급증" else "❄️" if vol["trend"] == "저조" else "➡️"
+            mom_indicator = "🚀" if mom["trend"] == "상승세" else "📉" if mom["trend"] == "하락세" else "➡️"
+
+            technical_section = f"""
+## 📈 기술적 지표 분석
+
+### 이동평균선 분석 ({ma_indicator} {ma['trend']})
+"""
+            if ma["ma5"]:
+                technical_section += f"""**MA5 (5일 평균)**: {ma['ma5']:,.0f}원 (현재가 대비 {ma['current_vs_ma5']:+.2f}%)
+"""
+            if ma["ma20"]:
+                technical_section += f"""**MA20 (20일 평균)**: {ma['ma20']:,.0f}원 (현재가 대비 {ma['current_vs_ma20']:+.2f}%)
+"""
+            if ma["ma60"]:
+                technical_section += f"""**MA60 (60일 평균)**: {ma['ma60']:,.0f}원 (현재가 대비 {ma['current_vs_ma60']:+.2f}%)
+"""
+
+            # 이동평균 해석
+            if ma["trend"] == "강세":
+                technical_section += """
+**해석**: 단기/중기/장기 이동평균선을 모두 상향 돌파한 강세 정배열 상태입니다.
+→ 기술적으로 상승 추세가 견고하며, 긍정적 뉴스의 영향이 증폭될 수 있습니다.
+"""
+            elif ma["trend"] == "약세":
+                technical_section += """
+**해석**: 이동평균선 역배열 상태로 기술적 약세 구간입니다.
+→ 부정적 뉴스의 영향이 더 클 수 있으며, 긍정적 뉴스도 단기 반등에 그칠 가능성이 있습니다.
+"""
+            else:
+                technical_section += """
+**해석**: 이동평균선이 혼재된 중립 구간입니다.
+→ 뉴스의 내용에 따라 방향성이 결정될 가능성이 높습니다.
+"""
+
+            # 거래량 분석
+            technical_section += f"""
+### 거래량 분석 ({vol_indicator} {vol['trend']})
+**오늘 거래량**: {vol['current_volume']:,}주
+**20일 평균 거래량**: {vol['avg_volume_20d']:,.0f}주
+**거래량 비율**: {vol['volume_ratio']:+.2f}% (평균 대비)
+
+"""
+            if vol["trend"] == "급증":
+                technical_section += """**해석**: 거래량이 평균 대비 급증했습니다.
+→ 시장 관심도가 높아진 상태로, 뉴스 영향이 증폭될 가능성이 큽니다.
+"""
+            elif vol["trend"] == "저조":
+                technical_section += """**해석**: 거래량이 평균 이하로 저조합니다.
+→ 시장 관심도가 낮은 상태로, 뉴스 영향이 제한적일 수 있습니다.
+"""
+            else:
+                technical_section += """**해석**: 거래량이 평균 수준입니다.
+→ 정상적인 시장 참여 수준입니다.
+"""
+
+            # 가격 모멘텀
+            technical_section += f"""
+### 가격 모멘텀 ({mom_indicator} {mom['trend']})
+**1일 수익률**: {mom['change_1d']:+.2f}%
+**5일 수익률**: {mom['change_5d']:+.2f}%
+**20일 수익률**: {mom['change_20d']:+.2f}%
+
+"""
+            if mom["trend"] == "상승세":
+                technical_section += """**해석**: 단기/중기 모두 상승세를 지속하고 있습니다.
+→ 긍정적 모멘텀이 형성되어 있어, 호재성 뉴스의 영향이 더 클 것으로 예상됩니다.
+"""
+            elif mom["trend"] == "하락세":
+                technical_section += """**해석**: 단기/중기 모두 하락세입니다.
+→ 부정적 모멘텀 상태로, 악재성 뉴스의 타격이 더 클 수 있습니다.
+"""
+            else:
+                technical_section += """**해석**: 단기/중기 방향이 혼재된 보합 상태입니다.
+→ 뉴스 내용에 따라 방향이 결정될 것으로 예상됩니다.
+"""
+
+            # RSI 분석
+            rsi = technical.get("rsi", {})
+            if rsi and rsi.get("value") is not None:
+                rsi_value = rsi["value"]
+                rsi_signal = rsi["signal"]
+
+                rsi_indicator = "🔥" if rsi_signal == "과매수" else "❄️" if rsi_signal == "과매도" else "➡️"
+
+                technical_section += f"""
+### RSI 분석 ({rsi_indicator} {rsi_signal})
+**RSI (14일)**: {rsi_value:.2f}
+
+"""
+                if rsi_signal == "과매수":
+                    technical_section += """**해석**: RSI가 70 이상으로 과매수 구간입니다.
+→ 단기 조정 가능성이 있으며, 호재성 뉴스에도 상승 여력이 제한적일 수 있습니다.
+→ 차익 실현 압력이 높아질 수 있으므로 신중한 접근이 필요합니다.
+"""
+                elif rsi_signal == "과매도":
+                    technical_section += """**해석**: RSI가 30 이하로 과매도 구간입니다.
+→ 기술적 반등 가능성이 있으며, 긍정적 뉴스 시 강한 반등이 기대됩니다.
+→ 저가 매수 기회로 해석될 수 있어 호재 뉴스의 영향이 증폭될 수 있습니다.
+"""
+                else:
+                    technical_section += """**해석**: RSI가 30~70 사이의 정상 구간입니다.
+→ 과매수/과매도 신호가 없어 뉴스 내용에 따라 자연스러운 주가 반응이 예상됩니다.
+"""
+
+            # 볼린저 밴드 분석
+            bb = technical.get("bollinger_bands", {})
+            if bb and bb.get("upper") is not None:
+                bb_upper = bb["upper"]
+                bb_middle = bb["middle"]
+                bb_lower = bb["lower"]
+                bb_position = bb["position"]
+
+                bb_indicator = "🔥" if bb_position == "상단 근접" else "❄️" if bb_position == "하단 근접" else "➡️"
+
+                technical_section += f"""
+### 볼린저 밴드 분석 ({bb_indicator} {bb_position})
+**상단 밴드**: {bb_upper:,.0f}원
+**중심선 (MA20)**: {bb_middle:,.0f}원
+**하단 밴드**: {bb_lower:,.0f}원
+
+"""
+                if bb_position == "상단 근접":
+                    technical_section += """**해석**: 주가가 볼린저 밴드 상단에 근접했습니다.
+→ 변동성이 커진 상태로 과열 가능성이 있습니다.
+→ 긍정적 뉴스에도 상승 제한이 있을 수 있으며, 조정 가능성을 염두에 두세요.
+"""
+                elif bb_position == "하단 근접":
+                    technical_section += """**해석**: 주가가 볼린저 밴드 하단에 근접했습니다.
+→ 과도한 하락으로 기술적 반등 가능성이 높습니다.
+→ 긍정적 뉴스 시 강한 반등 모멘텀이 형성될 수 있습니다.
+"""
+                else:
+                    technical_section += """**해석**: 주가가 볼린저 밴드 중심 부근에 위치합니다.
+→ 정상적인 변동성 범위 내에서 움직이고 있습니다.
+→ 뉴스 내용에 따라 밴드 상단 또는 하단으로의 이동이 예상됩니다.
+"""
+
+            # MACD 분석
+            macd = technical.get("macd", {})
+            if macd and macd.get("macd_line") is not None:
+                macd_line = macd["macd_line"]
+                macd_signal = macd["signal_line"]
+                macd_histogram = macd["histogram"]
+                macd_trend = macd["trend"]
+
+                macd_indicator = "📈" if macd_trend == "매수" else "📉" if macd_trend == "매도" else "➡️"
+
+                technical_section += f"""
+### MACD 분석 ({macd_indicator} {macd_trend} 신호)
+**MACD Line**: {macd_line:.2f}
+**Signal Line**: {macd_signal:.2f}
+**Histogram**: {macd_histogram:.2f}
+
+"""
+                if macd_trend == "매수":
+                    technical_section += """**해석**: MACD가 시그널선을 상향 돌파한 매수 신호입니다.
+→ 상승 모멘텀이 강화되는 구간으로 긍정적 뉴스의 영향이 증폭될 것입니다.
+→ 히스토그램이 양수로 전환되며 추세 전환 가능성이 높습니다.
+"""
+                elif macd_trend == "매도":
+                    technical_section += """**해석**: MACD가 시그널선을 하향 돌파한 매도 신호입니다.
+→ 하락 모멘텀이 강화되는 구간으로 부정적 뉴스의 타격이 클 것입니다.
+→ 히스토그램이 음수로 전환되며 약세 추세가 지속될 가능성이 있습니다.
+"""
+                else:
+                    technical_section += """**해석**: MACD가 시그널선과 근접한 중립 구간입니다.
+→ 뚜렷한 방향성이 없는 보합 상태로, 뉴스 내용에 따라 추세가 결정될 것입니다.
+"""
+
+            technical_section += """
+**⚠️ 고급 기술적 지표 종합 활용 지침**:
+- RSI 과매도 + 볼린저 하단 + MACD 매수 신호 → 강력한 반등 가능성, 호재 뉴스 영향 극대화
+- RSI 과매수 + 볼린저 상단 + MACD 매도 신호 → 조정 가능성, 악재 뉴스 타격 심화
+- 이동평균 정배열 + 거래량 급증 + 상승 모멘텀 + MACD 매수 → 강세장, 긍정 뉴스 최대 효과
+- 이동평균 역배열 + 거래량 저조 + 하락 모멘텀 + MACD 매도 → 약세장, 부정 뉴스 최대 타격
+- 모든 지표가 중립이면 뉴스 내용 자체의 펀더멘털 분석에 집중하세요
+"""
+        else:
+            technical_section = "\n## 📈 기술적 지표 분석\n기술적 지표 데이터 없음\n"
 
         # 7. 최근 DART 공시 정보 조회
         disclosures = self._get_recent_disclosures(stock_code, days=7) if stock_code else []
@@ -564,6 +1100,7 @@ class StockPredictor:
 
         # 8. 시장 지수 맥락 정보 조회
         market_context = self._get_market_context()
+        sector_context = self._get_sector_indices(top_n=3)
 
         market_section = "\n## 📈 시장 지수 현황\n"
         if market_context.get("kospi"):
@@ -579,16 +1116,31 @@ class StockPredictor:
         if not market_context.get("kospi") and not market_context.get("kosdaq"):
             market_section += "시장 지수 정보 없음\n"
 
+        # 섹터 지수 정보 추가
+        if sector_context.get("top_sectors") and len(sector_context["top_sectors"]) > 0:
+            market_section += "\n**🔥 강세 섹터** (변동률 상위):\n"
+            for sector in sector_context["top_sectors"]:
+                indicator = "📈" if sector["change_pct"] > 0 else "📉"
+                market_section += f"- {sector['name']}: {indicator} {sector['change_pct']:+.2f}%\n"
+
+        if sector_context.get("bottom_sectors") and len(sector_context["bottom_sectors"]) > 0:
+            market_section += "\n**❄️ 약세 섹터** (변동률 하위):\n"
+            for sector in sector_context["bottom_sectors"]:
+                indicator = "📉" if sector["change_pct"] < 0 else "📈"
+                market_section += f"- {sector['name']}: {indicator} {sector['change_pct']:+.2f}%\n"
+
         market_section += """
 **⚠️ 시장 맥락 고려사항**:
 - 시장 전체가 상승세라면 개별 종목의 긍정적 뉴스 영향이 증폭될 수 있습니다
 - 시장이 하락세라면 부정적 뉴스의 영향이 더 클 수 있습니다
+- 해당 종목이 속한 섹터의 흐름도 뉴스 영향력에 영향을 줍니다
 """
 
         # 9. 최종 프롬프트 생성
         prompt = f"""
-당신은 한국 주식 시장의 **종합 투자 어드바이저**입니다.
-뉴스, 공시, 과거 패턴, 현재 주가를 종합적으로 분석하여 신뢰할 수 있는 예측을 제공하세요.
+당신은 한국 주식 시장의 **뉴스 영향도 분석가**입니다.
+뉴스, 공시, 과거 패턴, 현재 주가를 종합적으로 분석하여 뉴스가 기업과 주가에 미치는 영향을 평가하세요.
+가격을 예측하는 것이 아니라, 뉴스의 영향력을 분석하는 것이 당신의 역할입니다.
 
 ---
 
@@ -599,6 +1151,8 @@ class StockPredictor:
 
 ---
 {price_section}
+---
+{technical_section}
 ---
 {market_section}
 ---
@@ -614,45 +1168,67 @@ class StockPredictor:
 
 ## 분석 요청사항
 
-1. **패턴 분석**: 위 통계를 참고하여 유사 뉴스들의 주가 변동 패턴을 분석하세요
-2. **예측**: 현재 뉴스가 주가에 미칠 영향을 예측하세요 (상승/하락/유지)
-3. **신뢰도 계산**: 다음 요소를 고려하여 신뢰도를 계산하고, 각 요소의 점수를 제시하세요
-   - 유사 뉴스 개수 및 유사도 (높을수록 신뢰도 상승)
-   - 과거 패턴의 일관성 (변동폭이 일정할수록 신뢰도 상승)
-   - 공시 정보 유무 (공시가 있으면 신뢰도 상승)
-4. **근거**: 예측 근거를 **구체적 수치**와 함께 명확히 설명하세요
+당신의 역할은 **뉴스가 기업과 주가에 미치는 영향도를 분석**하는 것입니다.
+가격을 직접 예측하지 말고, 뉴스의 영향력을 다각도로 평가하세요.
+
+1. **감성 방향 및 점수**: 뉴스의 전반적인 감성을 평가하세요
+   - positive (긍정적 영향), negative (부정적 영향), neutral (중립적)
+   - sentiment_score: -1.0 (매우 부정적) ~ +1.0 (매우 긍정적)
+
+2. **영향 수준**: 이 뉴스가 주가에 미칠 영향의 크기를 평가하세요
+   - low: 경미한 영향 (일상적 뉴스, 작은 변화)
+   - medium: 중간 영향 (사업 일부에 영향)
+   - high: 큰 영향 (핵심 사업에 영향, 시장 주목)
+   - critical: 매우 큰 영향 (기업 전체에 영향, 게임 체인저)
+
+3. **관련성 점수**: 이 뉴스가 해당 기업의 핵심 사업과 얼마나 관련 있는지 평가하세요
+   - relevance_score: 0.0 (무관) ~ 1.0 (핵심 사업 직접 관련)
+
+4. **긴급도**: 시장이 이 뉴스에 얼마나 빠르게 반응할지 평가하세요
+   - routine: 일상적 (시장 반응 미미)
+   - notable: 주목할 만한 (점진적 반응)
+   - urgent: 긴급 (빠른 반응 예상)
+   - breaking: 속보 (즉각적 반응 예상)
+
+5. **영향 분석**: 다음 4가지 측면에서 구체적으로 분석하세요
+   - business_impact: 사업에 미치는 영향 (매출, 이익, 시장 점유율 등)
+   - market_sentiment_impact: 시장 심리에 미치는 영향
+   - competitive_impact: 경쟁 구도 변화
+   - regulatory_impact: 규제나 정책 환경 변화
 
 **응답 형식** (JSON):
 ```json
 {{
-  "prediction": "상승" | "하락" | "유지",
-  "confidence": 75,
-  "confidence_breakdown": {{
-    "similar_news_quality": 85,
-    "pattern_consistency": 70,
-    "disclosure_impact": 60,
-    "explanation": "신뢰도 계산 근거 설명"
+  "sentiment_direction": "positive",
+  "sentiment_score": 0.7,
+  "impact_level": "high",
+  "relevance_score": 0.85,
+  "urgency_level": "urgent",
+  "reasoning": "영향도 분석 근거 설명 (구체적 수치 포함)",
+  "impact_analysis": {{
+    "business_impact": "신제품 출시로 향후 6개월 매출 15% 증가 예상. 주력 사업 부문 강화.",
+    "market_sentiment_impact": "투자자들의 긍정적 반응 예상. 기관 매수 가능성.",
+    "competitive_impact": "경쟁사 대비 기술 우위 확보. 시장 점유율 2-3%p 상승 기대.",
+    "regulatory_impact": "규제 변화 없음. 정책적 리스크 낮음."
   }},
-  "reasoning": "예측 근거 설명 (구체적 수치 포함)",
   "pattern_analysis": {{
     "avg_1d": 2.5,
     "avg_3d": 5.3,
     "avg_5d": 7.8,
     "max_1d": 4.2,
     "min_1d": 0.8
-  }},
-  "short_term": "단기적으로 2.5% 상승 예상",
-  "medium_term": "중기적으로 5.3% 상승 예상",
-  "long_term": "장기적으로 7.8% 상승 예상"
+  }}
 }}
 ```
 
 **중요 지침**:
-- **confidence_breakdown**: 각 요소(similar_news_quality, pattern_consistency, disclosure_impact)를 0-100 점수로 평가하고, 계산 근거를 explanation에 설명하세요
-- **pattern_analysis**: 유사 뉴스 통계를 그대로 반영하여 avg_1d, avg_3d, avg_5d 등을 제시하세요
-- **reasoning**: "과거 15건 중 12건 상승, 평균 +7.2%" 같은 구체적 수치를 포함하세요
-- short_term, medium_term, long_term에는 **반드시 구체적인 퍼센트(%)를 포함**하세요
-- 유사 뉴스가 없으면 신뢰도를 낮게 설정하고, 뉴스 내용만으로 합리적인 수치를 제시하세요
+- **sentiment_score**: 뉴스 내용의 긍정/부정 정도를 -1.0 ~ +1.0 범위로 평가하세요
+- **impact_level**: 뉴스가 주가에 미칠 영향의 절대적 크기를 평가하세요
+- **relevance_score**: 기업의 핵심 사업과의 관련도를 0.0 ~ 1.0 범위로 평가하세요
+- **urgency_level**: 시장의 반응 속도를 평가하세요 (routine < notable < urgent < breaking)
+- **impact_analysis**: 각 측면에서 구체적이고 정량적인 분석을 제공하세요
+- **pattern_analysis**: 유사 뉴스 통계를 참고용으로 포함하되, 직접적인 가격 예측은 하지 마세요
+- **reasoning**: 왜 이러한 영향도 평가를 내렸는지 구체적으로 설명하세요
 """
         return prompt.strip()
 
@@ -664,7 +1240,7 @@ class StockPredictor:
         use_cache: bool = True,
     ) -> Dict[str, Any]:
         """
-        뉴스 기반 주가 예측
+        뉴스 기반 영향도 분석
 
         Args:
             current_news: 현재 뉴스 정보
@@ -673,17 +1249,19 @@ class StockPredictor:
             use_cache: 캐시 사용 여부 (기본값: True)
 
         Returns:
-            예측 결과 {
-                "prediction": str,      # 상승/하락/유지
-                "confidence": int,      # 0-100
-                "reasoning": str,       # 예측 근거
-                "short_term": str,      # 1일 예측
-                "medium_term": str,     # 3일 예측
-                "long_term": str,       # 5일 예측
-                "similar_count": int,   # 참고한 유사 뉴스 개수
-                "model": str,           # 사용 모델
-                "timestamp": str,       # 예측 시각
-                "cached": bool          # 캐시에서 조회했는지 여부
+            영향도 분석 결과 {
+                "sentiment_direction": str,     # positive/negative/neutral
+                "sentiment_score": float,       # -1.0 ~ 1.0
+                "impact_level": str,            # low/medium/high/critical
+                "relevance_score": float,       # 0.0 ~ 1.0
+                "urgency_level": str,           # routine/notable/urgent/breaking
+                "reasoning": str,               # 분석 근거
+                "impact_analysis": dict,        # 영향도 상세 분석
+                "pattern_analysis": dict,       # 과거 패턴 분석
+                "similar_count": int,           # 참고한 유사 뉴스 개수
+                "model": str,                   # 사용 모델
+                "timestamp": str,               # 분석 시각
+                "cached": bool                  # 캐시에서 조회했는지 여부
             }
         """
         stock_code = current_news.get("stock_code")
@@ -752,13 +1330,50 @@ class StockPredictor:
             result["timestamp"] = datetime.now().isoformat()
             result["cached"] = False
 
-            # 5. 신뢰도 breakdown이 없으면 기본값 추가 (하위 호환성)
-            if "confidence_breakdown" not in result:
-                result["confidence_breakdown"] = {
-                    "similar_news_quality": result.get("confidence", 0),
-                    "pattern_consistency": 0,
-                    "disclosure_impact": 0,
-                    "explanation": "구 버전 응답 (breakdown 없음)"
+            # 5. 새 필드 검증 및 기본값 설정
+            # sentiment_direction 검증
+            if "sentiment_direction" in result:
+                valid_directions = ["positive", "negative", "neutral"]
+                if result["sentiment_direction"] not in valid_directions:
+                    logger.warning(f"Invalid sentiment_direction: {result['sentiment_direction']}, defaulting to 'neutral'")
+                    result["sentiment_direction"] = "neutral"
+
+            # sentiment_score 검증 (-1.0 ~ 1.0)
+            if "sentiment_score" in result:
+                score = result["sentiment_score"]
+                if not isinstance(score, (int, float)) or score < -1.0 or score > 1.0:
+                    logger.warning(f"Invalid sentiment_score: {score}, defaulting to 0.0")
+                    result["sentiment_score"] = 0.0
+
+            # impact_level 검증
+            if "impact_level" in result:
+                valid_levels = ["low", "medium", "high", "critical"]
+                if result["impact_level"] not in valid_levels:
+                    logger.warning(f"Invalid impact_level: {result['impact_level']}, defaulting to 'medium'")
+                    result["impact_level"] = "medium"
+
+            # relevance_score 검증 (0.0 ~ 1.0)
+            if "relevance_score" in result:
+                score = result["relevance_score"]
+                if not isinstance(score, (int, float)) or score < 0.0 or score > 1.0:
+                    logger.warning(f"Invalid relevance_score: {score}, defaulting to 0.5")
+                    result["relevance_score"] = 0.5
+
+            # urgency_level 검증
+            if "urgency_level" in result:
+                valid_urgencies = ["routine", "notable", "urgent", "breaking"]
+                if result["urgency_level"] not in valid_urgencies:
+                    logger.warning(f"Invalid urgency_level: {result['urgency_level']}, defaulting to 'notable'")
+                    result["urgency_level"] = "notable"
+
+            # impact_analysis 검증
+            if "impact_analysis" not in result or not isinstance(result["impact_analysis"], dict):
+                logger.warning("Missing or invalid impact_analysis, setting defaults")
+                result["impact_analysis"] = {
+                    "business_impact": "분석 필요",
+                    "market_sentiment_impact": "분석 필요",
+                    "competitive_impact": "분석 필요",
+                    "regulatory_impact": "분석 필요"
                 }
 
             # 6. pattern_analysis가 없으면 기본값 추가 (하위 호환성)
@@ -769,17 +1384,18 @@ class StockPredictor:
                     "avg_5d": None,
                 }
 
-            # 7. 검증
-            if "prediction" not in result or "confidence" not in result:
-                raise ValueError("예측 결과 형식 오류")
+            # 7. 검증 - 새 필드 검증으로 변경
+            required_fields = ["sentiment_direction", "sentiment_score", "impact_level",
+                             "relevance_score", "urgency_level", "impact_analysis"]
+            missing_fields = [f for f in required_fields if f not in result]
+            if missing_fields:
+                raise ValueError(f"필수 필드 누락: {', '.join(missing_fields)}")
 
-            # 신뢰도 breakdown 로깅
-            breakdown = result.get("confidence_breakdown", {})
+            # 영향도 분석 로깅
             logger.info(
-                f"예측 완료: {result['prediction']} (신뢰도: {result['confidence']}%) - "
-                f"유사도품질: {breakdown.get('similar_news_quality', 'N/A')}, "
-                f"패턴일관성: {breakdown.get('pattern_consistency', 'N/A')}, "
-                f"공시영향: {breakdown.get('disclosure_impact', 'N/A')}"
+                f"영향도 분석 완료: {result['sentiment_direction']} (점수: {result['sentiment_score']:.2f}) - "
+                f"영향도: {result['impact_level']}, 관련성: {result['relevance_score']:.2f}, "
+                f"긴급도: {result['urgency_level']}"
             )
 
             # 6. 캐시 저장
@@ -799,21 +1415,32 @@ class StockPredictor:
 
     def _get_fallback_prediction(self, error_msg: str) -> Dict[str, Any]:
         """
-        예측 실패 시 폴백 응답
+        분석 실패 시 폴백 응답
 
         Args:
             error_msg: 오류 메시지
 
         Returns:
-            기본 예측 결과
+            기본 분석 결과
         """
         return {
-            "prediction": "유지",
-            "confidence": 0,
-            "reasoning": f"예측 실패: {error_msg}",
-            "short_term": "예측 불가",
-            "medium_term": "예측 불가",
-            "long_term": "예측 불가",
+            "sentiment_direction": "neutral",
+            "sentiment_score": 0.0,
+            "impact_level": "low",
+            "relevance_score": 0.0,
+            "urgency_level": "routine",
+            "reasoning": f"분석 실패: {error_msg}",
+            "impact_analysis": {
+                "business_impact": "분석 불가",
+                "market_sentiment_impact": "분석 불가",
+                "competitive_impact": "분석 불가",
+                "regulatory_impact": "분석 불가"
+            },
+            "pattern_analysis": {
+                "avg_1d": None,
+                "avg_3d": None,
+                "avg_5d": None
+            },
             "similar_count": 0,
             "model": self.model,
             "timestamp": datetime.now().isoformat(),

@@ -16,6 +16,8 @@ export default function Navigation() {
     { href: "/ab-config", label: "🔬 A/B 설정" },
     { href: "/admin/dashboard", label: "⚙️ 관리자" },
     { href: "/admin/stocks", label: "⚙️ 종목 관리" },
+    { href: "/admin/evaluations", label: "📝 모델 평가" },
+    { href: "/admin/performance", label: "📊 성능 대시보드" },
   ];
 
   return (

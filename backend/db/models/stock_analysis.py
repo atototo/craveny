@@ -38,7 +38,7 @@ class StockAnalysisSummary(Base):
     __tablename__ = "stock_analysis_summaries"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    stock_code = Column(String(10), unique=True, nullable=False, index=True)
+    stock_code = Column(String(10), nullable=False, index=True)  # Removed unique=True to allow multiple date records
 
     # LLM 생성 콘텐츠
     overall_summary = Column(Text, nullable=True)
@@ -58,6 +58,14 @@ class StockAnalysisSummary(Base):
 
     # A/B 테스트용 전체 리포트 JSON 저장
     custom_data = Column(JSON, nullable=True)
+
+    # 구조화된 투자 전략 데이터 (평가 시스템용)
+    short_term_target_price = Column(Float, nullable=True)  # 단기 목표가
+    short_term_support_price = Column(Float, nullable=True)  # 단기 손절가
+    medium_term_target_price = Column(Float, nullable=True)  # 중기 목표가
+    medium_term_support_price = Column(Float, nullable=True)  # 중기 손절가
+    long_term_target_price = Column(Float, nullable=True)  # 장기 목표가
+    base_price = Column(Float, nullable=True)  # 분석 시점 기준가
 
     # 메타 정보
     last_updated = Column(DateTime, default=datetime.now, nullable=False)
