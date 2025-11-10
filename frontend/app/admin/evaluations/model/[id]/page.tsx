@@ -21,7 +21,7 @@ export default function ModelDetailPage() {
   const fetchModelDetail = async () => {
     try {
       const res = await fetch(
-        `http://localhost:8000/api/evaluations/model/${modelId}?days=${period}`
+        `/api/evaluations/model/${modelId}?days=${period}`
       );
       const data = await res.json();
       setModelData(data);

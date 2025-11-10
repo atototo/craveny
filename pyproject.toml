@@ -45,7 +45,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "pymilvus.*",
-    "FinanceDataReader.*",
     "celery.*",
     "apscheduler.*",
 ]

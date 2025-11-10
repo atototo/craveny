@@ -40,7 +40,7 @@ export default function ABTestPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      const response = await fetch('http://localhost:8000/api/ab-test/predict', {
+      const response = await fetch('/api/ab-test/predict', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

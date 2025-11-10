@@ -41,11 +41,9 @@ app.include_router(dashboard.router, tags=["Dashboard"])
 app.include_router(news.router, tags=["News"])
 app.include_router(stocks.router, tags=["Stocks"])
 app.include_router(stock_management.router, tags=["Stock Management"])
-app.include_router(ab_test.router, prefix="/api", tags=["A/B Test"])
-app.include_router(models.router, prefix="/api", tags=["Models"])
-app.include_router(evaluations.router, prefix="/api", tags=["Evaluations"])
-# WORKAROUND: Next.js proxy 이슈로 prefix 없이도 등록
-app.include_router(evaluations.router, tags=["Evaluations (no prefix)"])
+app.include_router(ab_test.router, tags=["A/B Test"])
+app.include_router(models.router, tags=["Models"])
+app.include_router(evaluations.router, tags=["Evaluations"])
 
 
 @app.on_event("startup")

@@ -20,6 +20,7 @@ from backend.services.stock_analysis_service import (
     get_stock_analysis_summary,
     update_stock_analysis_summary,
 )
+from backend.services.price_service import get_current_price, get_market_status
 
 
 logger = logging.getLogger(__name__)
@@ -282,26 +283,39 @@ async def get_stock_detail(
             NewsArticle.notified_at.isnot(None)
         ).scalar() or 0
 
-        # 예측 통계
-        avg_confidence = db.query(func.avg(Prediction.confidence)).filter(
-            Prediction.stock_code == stock_code
+        # 예측 통계 (신 스키마 사용: sentiment_direction)
+        # sentiment_score는 -1.0~1.0이므로 평균을 0~1로 정규화
+        avg_sentiment = db.query(func.avg(Prediction.sentiment_score)).filter(
+            Prediction.stock_code == stock_code,
+            Prediction.sentiment_score.isnot(None)
         ).scalar()
 
-        # 방향 분포
+        # 0~1 범위로 정규화 (-1~1 → 0~1)
+        avg_confidence = ((avg_sentiment + 1) / 2) if avg_sentiment is not None else None
+
+        # 방향 분포 (sentiment_direction 사용: positive/negative/neutral → up/down/hold 매핑)
         direction_counts = db.query(
-            Prediction.direction,
+            Prediction.sentiment_direction,
             func.count(Prediction.id)
         ).filter(
-            Prediction.stock_code == stock_code
-        ).group_by(Prediction.direction).all()
+            Prediction.stock_code == stock_code,
+            Prediction.sentiment_direction.isnot(None)
+        ).group_by(Prediction.sentiment_direction).all()
 
         direction_distribution = {
             "up": 0,
             "down": 0,
             "hold": 0
         }
-        for direction, count in direction_counts:
-            if direction in direction_distribution:
+        # sentiment_direction을 direction으로 매핑
+        sentiment_to_direction = {
+            "positive": "up",
+            "negative": "down",
+            "neutral": "hold"
+        }
+        for sentiment, count in direction_counts:
+            direction = sentiment_to_direction.get(sentiment)
+            if direction and direction in direction_distribution:
                 direction_distribution[direction] = count
 
         # Phase 2: 전체 예측의 종합 통계 계산
@@ -439,32 +453,13 @@ async def get_stock_detail(
                     }
                 }
 
-        # 최신 주가
-        latest_price = db.query(StockPrice).filter(
-            StockPrice.stock_code == stock_code
-        ).order_by(StockPrice.date.desc()).first()
+        # 시간대별 현재가 조회
+        current_price = await get_current_price(stock_code, db)
 
-        current_price = None
-        if latest_price:
-            # 전일 대비 변동률 계산
-            previous_price = db.query(StockPrice).filter(
-                StockPrice.stock_code == stock_code,
-                StockPrice.date < latest_price.date
-            ).order_by(StockPrice.date.desc()).first()
-
-            change_rate = 0.0
-            if previous_price and previous_price.close > 0:
-                change_rate = ((latest_price.close - previous_price.close) / previous_price.close) * 100
-
-            current_price = {
-                "close": latest_price.close,
-                "open": latest_price.open,
-                "high": latest_price.high,
-                "low": latest_price.low,
-                "volume": latest_price.volume,
-                "change_rate": round(change_rate, 2),
-                "date": latest_price.date.isoformat() if latest_price.date else None,
-            }
+        # 시장 상태 추가
+        market_status = get_market_status()
+        if current_price:
+            current_price["market_status"] = market_status
 
         # 최근 뉴스 (5건) + 예측 정보
         recent_news = db.query(NewsArticle).filter(

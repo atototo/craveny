@@ -275,7 +275,7 @@ export default function StockDetailPage() {
 
   // A/B 설정 가져오기
   useEffect(() => {
-    fetch("http://localhost:8000/api/ab-test/config")
+    fetch("/api/ab-test/config")
       .then((res) => res.json())
       .then((data) => {
         if (data.model_a && data.model_b) {
@@ -420,19 +420,19 @@ export default function StockDetailPage() {
               <div>
                 <p className="text-sm text-gray-600">시가</p>
                 <p className="text-xl font-semibold text-gray-700">
-                  {stock.current_price.open.toLocaleString()}원
+                  {stock.current_price.open ? stock.current_price.open.toLocaleString() : '-'}원
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-600">고가</p>
                 <p className="text-xl font-semibold text-red-600">
-                  {stock.current_price.high.toLocaleString()}원
+                  {stock.current_price.high ? stock.current_price.high.toLocaleString() : '-'}원
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-600">저가</p>
                 <p className="text-xl font-semibold text-blue-600">
-                  {stock.current_price.low.toLocaleString()}원
+                  {stock.current_price.low ? stock.current_price.low.toLocaleString() : '-'}원
                 </p>
               </div>
             </div>

@@ -21,7 +21,7 @@ export default function StockPerformanceTable({
   const fetchStockPerformance = async () => {
     try {
       const res = await fetch(
-        `http://localhost:8000/api/evaluations/model/${modelId}/stocks?days=${period}`
+        `/api/evaluations/model/${modelId}/stocks?days=${period}`
       );
       const data = await res.json();
       setStockData(data);

@@ -26,7 +26,7 @@ export default function ModelsPage() {
   // 모델 목록 조회
   const fetchModels = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/models");
+      const response = await fetch("/api/models");
       const data = await response.json();
       setModels(data);
     } catch (error) {
@@ -45,7 +45,7 @@ export default function ModelsPage() {
   const handleAddModel = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:8000/api/models", {
+      const response = await fetch("/api/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
@@ -75,7 +75,7 @@ export default function ModelsPage() {
   const handleToggleActive = async (modelId: number) => {
     try {
       const response = await fetch(
-        `http://localhost:8000/api/models/${modelId}/toggle`,
+        `/api/models/${modelId}/toggle`,
         { method: "PATCH" }
       );
 
@@ -98,7 +98,7 @@ export default function ModelsPage() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/models/${modelId}`,
+        `/api/models/${modelId}`,
         { method: "DELETE" }
       );
 

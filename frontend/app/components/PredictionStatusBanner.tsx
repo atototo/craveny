@@ -31,7 +31,7 @@ export default function PredictionStatusBanner() {
 
   async function fetchStatus() {
     try {
-      const res = await fetch("http://localhost:8000/api/ab-test/prediction-status");
+      const res = await fetch("/api/ab-test/prediction-status");
       if (res.ok) {
         const data = await res.json();
         setStatus(data);

@@ -37,14 +37,25 @@ export default function Home() {
 
     // 오늘의 HOT 종목 조회
     fetch("/api/stocks/summary")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
       .then((data) => {
         // 뉴스가 많은 상위 5개 종목
-        setHotStocks(data.slice(0, 5));
+        if (Array.isArray(data)) {
+          setHotStocks(data.slice(0, 5));
+        } else {
+          console.error("Expected array but got:", typeof data);
+          setHotStocks([]);
+        }
         setLoading(false);
       })
       .catch((err) => {
         console.error("Failed to fetch hot stocks:", err);
+        setHotStocks([]);
         setLoading(false);
       });
   }, []);

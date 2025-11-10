@@ -52,13 +52,44 @@ class StockPredictor:
         self.active_models = self._load_active_models()
         logger.info(f"✅ 활성 모델 {len(self.active_models)}개 로드 완료")
 
-        # 레거시 A/B 테스트 (환경변수 기반) - 하위 호환성
+        # 레거시 A/B 테스트 (DB 기반)
         if settings.AB_TEST_ENABLED:
-            self.client_a = self._create_client(settings.MODEL_A_PROVIDER)
-            self.model_a = settings.MODEL_A_NAME
-            self.client_b = self._create_client(settings.MODEL_B_PROVIDER)
-            self.model_b = settings.MODEL_B_NAME
-            logger.info(f"A/B 테스트 활성화 (레거시): Model A={self.model_a}, Model B={self.model_b}")
+            # DB에서 A/B 테스트 설정 가져오기
+            from backend.db.models.ab_test_config import ABTestConfig
+
+            db = SessionLocal()
+            try:
+                ab_config = db.query(ABTestConfig).filter(
+                    ABTestConfig.is_active == True
+                ).first()
+
+                if ab_config:
+                    # Model A/B 정보 가져오기
+                    model_a = db.query(Model).filter(Model.id == ab_config.model_a_id).first()
+                    model_b = db.query(Model).filter(Model.id == ab_config.model_b_id).first()
+
+                    if model_a and model_b:
+                        self.client_a = self._create_client(model_a.provider)
+                        self.model_a = model_a.model_identifier
+                        self.client_b = self._create_client(model_b.provider)
+                        self.model_b = model_b.model_identifier
+                        logger.info(f"A/B 테스트 활성화 (레거시): Model A={model_a.name} ({self.model_a}), Model B={model_b.name} ({self.model_b})")
+                    else:
+                        # Fallback to config
+                        self.client_a = self._create_client(settings.MODEL_A_PROVIDER)
+                        self.model_a = settings.MODEL_A_NAME
+                        self.client_b = self._create_client(settings.MODEL_B_PROVIDER)
+                        self.model_b = settings.MODEL_B_NAME
+                        logger.warning(f"⚠️ DB 모델 정보 없음, config 사용: Model A={self.model_a}, Model B={self.model_b}")
+                else:
+                    # Fallback to config
+                    self.client_a = self._create_client(settings.MODEL_A_PROVIDER)
+                    self.model_a = settings.MODEL_A_NAME
+                    self.client_b = self._create_client(settings.MODEL_B_PROVIDER)
+                    self.model_b = settings.MODEL_B_NAME
+                    logger.warning(f"⚠️ 활성 A/B 테스트 설정 없음, config 사용: Model A={self.model_a}, Model B={self.model_b}")
+            finally:
+                db.close()
 
     def _create_client(self, provider: str) -> OpenAI:
         """프로바이더별 OpenAI 클라이언트 생성"""
@@ -398,6 +429,8 @@ class StockPredictor:
         """
         시장 지수 맥락 정보를 조회합니다.
 
+        KIS API 기반 index_daily_price 테이블 사용
+
         Returns:
             시장 지수 정보 딕셔너리
         """
@@ -405,24 +438,24 @@ class StockPredictor:
         try:
             from sqlalchemy import text
 
-            # KOSPI 최신 데이터
+            # KOSPI 최신 데이터 (index_code: 0001)
             kospi_result = db.execute(
                 text("""
-                    SELECT close, change_pct, date
-                    FROM market_indices
-                    WHERE index_name = 'KOSPI'
+                    SELECT close, change_rate, date
+                    FROM index_daily_price
+                    WHERE index_code = '0001'
                     ORDER BY date DESC
                     LIMIT 1
                 """)
             )
             kospi_row = kospi_result.fetchone()
 
-            # KOSDAQ 최신 데이터
+            # KOSDAQ 최신 데이터 (index_code: 1001)
             kosdaq_result = db.execute(
                 text("""
-                    SELECT close, change_pct, date
-                    FROM market_indices
-                    WHERE index_name = 'KOSDAQ'
+                    SELECT close, change_rate, date
+                    FROM index_daily_price
+                    WHERE index_code = '1001'
                     ORDER BY date DESC
                     LIMIT 1
                 """)
@@ -452,6 +485,9 @@ class StockPredictor:
         """
         섹터별 지수 정보 조회 (변동률 상위/하위)
 
+        KIS API 기반 index_daily_price 테이블 사용
+        업종 지수만 조회 (KOSPI, KOSDAQ 제외)
+
         Args:
             top_n: 상위/하위 각각 조회할 섹터 수
 
@@ -462,26 +498,28 @@ class StockPredictor:
         try:
             from sqlalchemy import text
 
-            # 최신 날짜의 섹터 지수 조회 (변동률 기준 정렬)
+            # 최신 날짜의 업종 지수 조회 (변동률 기준 정렬)
+            # index_code가 4자리(1010~1026)인 것만 조회 (업종 지수)
             result = db.execute(
                 text("""
                     WITH latest_date AS (
-                        SELECT MAX(date) as max_date FROM sector_indices
+                        SELECT MAX(date) as max_date FROM index_daily_price
                     )
                     SELECT
-                        sector_name,
+                        index_name,
                         close,
-                        change_pct
-                    FROM sector_indices
+                        change_rate
+                    FROM index_daily_price
                     WHERE date = (SELECT max_date FROM latest_date)
-                    AND change_pct IS NOT NULL
-                    ORDER BY change_pct DESC
+                    AND index_code LIKE '10__'  -- 업종 코드만 (1010~1026)
+                    AND change_rate IS NOT NULL
+                    ORDER BY change_rate DESC
                 """)
             )
             all_sectors = result.fetchall()
 
             if not all_sectors or len(all_sectors) == 0:
-                logger.warning("섹터 지수 데이터 없음")
+                logger.warning("섹터 지수 데이터 없음 (index_daily_price)")
                 return {"top_sectors": [], "bottom_sectors": []}
 
             # 상위 N개

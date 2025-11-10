@@ -6,7 +6,10 @@
       "Bash(for file in docs/stories/2.*.md)",
       "Bash(done)",
       "mcp__sequential-thinking__sequentialthinking",
-      "Bash(uv run python:*)"
+      "Bash(uv run python:*)",
+      "mcp__playwright__browser_navigate",
+      "Bash(python3:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

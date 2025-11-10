@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     REDDIT_MIN_COMMENTS: int = 2
     REDDIT_LOOKBACK_HOURS: int = 24
 
+    # KIS API (한국투자증권)
+    KIS_APP_KEY: str = ""
+    KIS_APP_SECRET: str = ""
+    KIS_ACCOUNT_NUMBER: str = ""
+    KIS_ACCOUNT_PRODUCT_CODE: str = "01"  # 01: 종합계좌
+    KIS_BASE_URL: str = "https://openapi.koreainvestment.com:9443"  # 실전투자
+    KIS_WEBSOCKET_URL: str = "wss://openapi.koreainvestment.com:9443"
+    KIS_MOCK_MODE: bool = True  # True: 모의투자, False: 실전투자
+
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -28,7 +28,7 @@ export default function ABConfigPage() {
   // 모델 목록 조회
   const fetchModels = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/models?active_only=true");
+      const response = await fetch("/api/models?active_only=true");
       const data = await response.json();
       setModels(data);
     } catch (error) {
@@ -39,7 +39,7 @@ export default function ABConfigPage() {
   // 현재 A/B 설정 조회
   const fetchABConfig = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/ab-test/config");
+      const response = await fetch("/api/ab-test/config");
       const data = await response.json();
 
       if (data.id) {
@@ -57,7 +57,7 @@ export default function ABConfigPage() {
   // A/B 설정 이력 조회
   const fetchHistory = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/ab-test/history");
+      const response = await fetch("/api/ab-test/history");
       const data = await response.json();
       setHistory(data.history || []);
     } catch (error) {
@@ -84,7 +84,7 @@ export default function ABConfigPage() {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/api/ab-test/config", {
+      const response = await fetch("/api/ab-test/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
