@@ -27,10 +27,21 @@ export default function ModelsPage() {
   const fetchModels = async () => {
     try {
       const response = await fetch("/api/models");
+      if (!response.ok) {
+        throw new Error(`API 오류: ${response.status}`);
+      }
       const data = await response.json();
-      setModels(data);
+      // 응답이 배열인지 확인
+      if (Array.isArray(data)) {
+        setModels(data);
+      } else {
+        console.error("예상치 못한 응답 형식:", data);
+        setModels([]);
+        alert("모델 목록 형식이 올바르지 않습니다.");
+      }
     } catch (error) {
       console.error("모델 조회 실패:", error);
+      setModels([]);
       alert("모델 목록을 불러오는데 실패했습니다.");
     } finally {
       setLoading(false);

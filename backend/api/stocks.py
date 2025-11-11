@@ -25,7 +25,7 @@ from backend.services.price_service import get_current_price, get_market_status
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/stocks")
 
 
 def get_db():
@@ -209,7 +209,7 @@ def _generate_investment_summary(
     }
 
 
-@router.get("/stocks/summary")
+@router.get("/summary")
 async def get_stocks_summary(db: Session = Depends(get_db)):
     """
     종목별 요약 통계
@@ -255,7 +255,7 @@ async def get_stocks_summary(db: Session = Depends(get_db)):
         raise
 
 
-@router.get("/stocks/{stock_code}")
+@router.get("/{stock_code}")
 async def get_stock_detail(
     stock_code: str,
     db: Session = Depends(get_db)
@@ -531,7 +531,7 @@ async def get_stock_detail(
         raise
 
 
-@router.get("/stocks/{stock_code}/prices")
+@router.get("/{stock_code}/prices")
 async def get_stock_prices(
     stock_code: str,
     days: int = Query(30, ge=1, le=365, description="조회할 일수"),
@@ -570,7 +570,7 @@ async def get_stock_prices(
         raise
 
 
-@router.get("/stocks/{stock_code}/predictions")
+@router.get("/{stock_code}/predictions")
 async def get_stock_predictions(
     stock_code: str,
     page: int = Query(1, ge=1),

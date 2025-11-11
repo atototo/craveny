@@ -18,7 +18,7 @@ from backend.llm.predictor import get_predictor
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 
 # === 요청/응답 스키마 ===

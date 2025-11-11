@@ -16,7 +16,7 @@ from backend.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 
 # ==================== Pydantic Models ====================

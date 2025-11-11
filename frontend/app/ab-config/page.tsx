@@ -29,10 +29,20 @@ export default function ABConfigPage() {
   const fetchModels = async () => {
     try {
       const response = await fetch("/api/models?active_only=true");
+      if (!response.ok) {
+        throw new Error(`API 오류: ${response.status}`);
+      }
       const data = await response.json();
-      setModels(data);
+      // 응답이 배열인지 확인
+      if (Array.isArray(data)) {
+        setModels(data);
+      } else {
+        console.error("예상치 못한 응답 형식:", data);
+        setModels([]);
+      }
     } catch (error) {
       console.error("모델 조회 실패:", error);
+      setModels([]); // 오류 시 빈 배열로 설정
     }
   };
 

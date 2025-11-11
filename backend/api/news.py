@@ -18,7 +18,7 @@ from backend.utils.stock_mapping import get_stock_mapper
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/news")
 
 
 def get_db():
@@ -30,7 +30,7 @@ def get_db():
         db.close()
 
 
-@router.get("/news")
+@router.get("")
 async def get_news_list(
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
@@ -146,7 +146,7 @@ async def get_news_list(
         raise
 
 
-@router.get("/news/{news_id}")
+@router.get("/{news_id}")
 async def get_news_detail(
     news_id: int,
     db: Session = Depends(get_db)

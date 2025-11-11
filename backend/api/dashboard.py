@@ -18,7 +18,7 @@ from backend.scheduler.crawler_scheduler import get_crawler_scheduler
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 
 def get_db():

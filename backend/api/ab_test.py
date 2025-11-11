@@ -15,7 +15,7 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/ab-test")
 
 
 class ABTestRequest(BaseModel):
@@ -24,7 +24,7 @@ class ABTestRequest(BaseModel):
     similar_news: List[Dict[str, Any]] = Field(..., description="유사 뉴스 리스트")
 
 
-@router.post("/ab-test/predict")
+@router.post("/predict")
 async def ab_test_predict(request: ABTestRequest):
     """
     A/B 테스트 예측 API
@@ -58,7 +58,7 @@ async def ab_test_predict(request: ABTestRequest):
         raise HTTPException(status_code=500, detail=f"A/B 테스트 실패: {str(e)}")
 
 
-@router.get("/ab-test/status")
+@router.get("/status")
 async def ab_test_status():
     """A/B 테스트 설정 상태 조회 (레거시 - 환경변수 기반)"""
     return {
@@ -101,7 +101,7 @@ class ABConfigCreate(BaseModel):
     model_b_id: int = Field(..., description="Model B ID")
 
 
-@router.get("/ab-test/config")
+@router.get("/config")
 async def get_ab_config():
     """
     현재 활성 A/B 설정 조회
@@ -145,7 +145,7 @@ async def get_ab_config():
         db.close()
 
 
-@router.post("/ab-test/config")
+@router.post("/config")
 async def update_ab_config(config: ABConfigCreate):
     """
     A/B 설정 변경
@@ -242,7 +242,7 @@ async def update_ab_config(config: ABConfigCreate):
         db.close()
 
 
-@router.get("/ab-test/prediction-status")
+@router.get("/prediction-status")
 async def get_prediction_status():
     """
     예측 생성 진행 상태 조회
@@ -264,7 +264,7 @@ async def get_prediction_status():
         raise HTTPException(status_code=500, detail=f"진행 상태 조회 실패: {str(e)}")
 
 
-@router.get("/ab-test/history")
+@router.get("/history")
 async def get_ab_config_history(limit: int = 10):
     """
     A/B 설정 변경 이력 조회
