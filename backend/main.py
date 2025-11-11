@@ -34,7 +34,9 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from backend.api import health, prediction, dashboard, news, stocks, stock_management, ab_test, models, evaluations
+from backend.api import health, prediction, dashboard, news, stocks, stock_management, ab_test, models, evaluations, auth, users
+app.include_router(auth.router)  # 인증은 tags가 router에 이미 정의됨
+app.include_router(users.router)  # 사용자 관리는 tags가 router에 이미 정의됨
 app.include_router(health.router, tags=["Health"])
 app.include_router(prediction.router, tags=["Prediction"])
 app.include_router(dashboard.router, tags=["Dashboard"])

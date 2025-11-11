@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str
     TELEGRAM_CHAT_ID: str
 
+    # 인증 (Authentication)
+    SECRET_KEY: str = "your-secret-key-change-this-in-production"
+    ADMIN_DEFAULT_PASSWORD: str = "admin123"
+    SESSION_COOKIE_NAME: str = "craveny_session"
+    SESSION_MAX_AGE: int = 86400  # 24시간 (초 단위)
+
     # DART (금융감독원 공시)
     DART_API_KEY: str = ""  # 선택사항
 

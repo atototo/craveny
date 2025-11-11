@@ -1,24 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { useAuth } from "@/app/contexts/AuthContext";
 
 export default function Navigation() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, isAdmin, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
-  const links = [
-    { href: "/", label: "대시보드" },
-    { href: "/stocks", label: "종목 분석" },
-    { href: "/predictions", label: "예측 이력" },
-    { href: "/models", label: "🤖 모델 관리" },
-    { href: "/ab-config", label: "🔬 A/B 설정" },
-    { href: "/admin/dashboard", label: "⚙️ 관리자" },
-    { href: "/admin/stocks", label: "⚙️ 종목 관리" },
-    { href: "/admin/evaluations", label: "📝 모델 평가" },
-    { href: "/admin/performance", label: "📊 성능 대시보드" },
+  // 전체 메뉴 목록
+  const allLinks = [
+    { href: "/", label: "대시보드", roles: ["user", "admin"] },
+    { href: "/stocks", label: "종목 분석", roles: ["user", "admin"] },
+    { href: "/predictions", label: "예측 이력", roles: ["admin"] },
+    { href: "/models", label: "🤖 모델 관리", roles: ["admin"] },
+    { href: "/ab-config", label: "🔬 A/B 설정", roles: ["admin"] },
+    { href: "/admin/dashboard", label: "⚙️ 관리자", roles: ["admin"] },
+    { href: "/admin/stocks", label: "⚙️ 종목 관리", roles: ["admin"] },
+    { href: "/admin/evaluations", label: "📝 모델 평가", roles: ["admin"] },
+    { href: "/admin/performance", label: "📊 성능 대시보드", roles: ["admin"] },
+    { href: "/admin/users", label: "👥 사용자 관리", roles: ["admin"] },
   ];
+
+  // 사용자 역할에 따라 메뉴 필터링
+  const links = allLinks.filter((link) => link.roles.includes(user?.role || "user"));
+
+  // 로그아웃 핸들러
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    try {
+      await logout();
+      router.push("/login");
+    } catch (error) {
+      console.error("로그아웃 실패:", error);
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
 
   return (
     <nav className="bg-white shadow">
@@ -45,6 +67,25 @@ export default function Navigation() {
                 </Link>
               ))}
             </div>
+          </div>
+
+          {/* User info and logout button */}
+          <div className="hidden sm:ml-6 sm:flex sm:items-center sm:space-x-4">
+            <div className="flex items-center space-x-2 text-sm text-gray-700">
+              <span className="font-medium">{user?.nickname}</span>
+              {isAdmin && (
+                <span className="px-2 py-1 text-xs font-semibold text-blue-800 bg-blue-100 rounded-full">
+                  관리자
+                </span>
+              )}
+            </div>
+            <button
+              onClick={handleLogout}
+              disabled={logoutLoading}
+              className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {logoutLoading ? "로그아웃 중..." : "로그아웃"}
+            </button>
           </div>
 
           {/* Mobile menu button */}
@@ -113,6 +154,29 @@ export default function Navigation() {
                 {link.label}
               </Link>
             ))}
+          </div>
+          {/* Mobile user info and logout */}
+          <div className="pt-4 pb-3 border-t border-gray-200">
+            <div className="flex items-center px-4">
+              <div className="flex-1">
+                <div className="text-base font-medium text-gray-800">{user?.nickname}</div>
+                <div className="text-sm font-medium text-gray-500">{user?.email}</div>
+                {isAdmin && (
+                  <span className="inline-block mt-1 px-2 py-1 text-xs font-semibold text-blue-800 bg-blue-100 rounded-full">
+                    관리자
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="mt-3 px-2">
+              <button
+                onClick={handleLogout}
+                disabled={logoutLoading}
+                className="w-full text-left px-3 py-2 text-base font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-md disabled:opacity-50"
+              >
+                {logoutLoading ? "로그아웃 중..." : "로그아웃"}
+              </button>
+            </div>
           </div>
         </div>
       )}

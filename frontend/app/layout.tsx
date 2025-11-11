@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Navigation from "./components/Navigation";
-import PredictionStatusBanner from "./components/PredictionStatusBanner";
+import { AuthProvider } from "./contexts/AuthContext";
+import LayoutWrapper from "./components/LayoutWrapper";
 
 export const metadata: Metadata = {
   title: "Craveny Dashboard",
@@ -16,9 +16,9 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className="bg-gray-50">
-        <Navigation />
-        <PredictionStatusBanner />
-        {children}
+        <AuthProvider>
+          <LayoutWrapper>{children}</LayoutWrapper>
+        </AuthProvider>
       </body>
     </html>
   );
