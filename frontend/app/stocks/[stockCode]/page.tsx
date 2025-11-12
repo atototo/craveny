@@ -576,7 +576,7 @@ export default function StockDetailPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* Risk Factors */}
-                {stock.analysis_summary.risk_factors.length > 0 && (
+                {stock.analysis_summary?.risk_factors && stock.analysis_summary.risk_factors.length > 0 && (
                   <div className="bg-white rounded-xl p-5 shadow-md border-l-4 border-orange-400">
                     <h4 className="text-lg font-bold text-orange-700 mb-4 flex items-center">
                       <span className="mr-2 text-xl">⚠️</span> 리스크 요인
@@ -593,7 +593,7 @@ export default function StockDetailPage() {
                 )}
 
                 {/* Opportunity Factors */}
-                {stock.analysis_summary.opportunity_factors.length > 0 && (
+                {stock.analysis_summary?.opportunity_factors && stock.analysis_summary.opportunity_factors.length > 0 && (
                   <div className="bg-white rounded-xl p-5 shadow-md border-l-4 border-teal-400">
                     <h4 className="text-lg font-bold text-teal-700 mb-4 flex items-center">
                       <span className="mr-2 text-xl">💡</span> 기회 요인

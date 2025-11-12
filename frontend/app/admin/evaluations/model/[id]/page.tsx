@@ -7,7 +7,7 @@ import StockPerformanceTable from '@/app/components/evaluations/StockPerformance
 
 export default function ModelDetailPage() {
   const params = useParams();
-  const modelId = params.id;
+  const modelId = Array.isArray(params.id) ? params.id[0] : (params.id || '');
 
   const [period, setPeriod] = useState('30');
   const [activeTab, setActiveTab] = useState('metrics');
@@ -15,7 +15,9 @@ export default function ModelDetailPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchModelDetail();
+    if (modelId) {
+      fetchModelDetail();
+    }
   }, [modelId, period]);
 
   const fetchModelDetail = async () => {
@@ -32,6 +34,7 @@ export default function ModelDetailPage() {
     }
   };
 
+  if (!modelId) return <div className="p-6">잘못된 모델 ID</div>;
   if (loading) return <div className="p-6">로딩 중...</div>;
   if (!modelData) return <div className="p-6">데이터 없음</div>;
 

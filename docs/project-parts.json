@@ -1,0 +1,33 @@
+{
+  "repository_type": "multi-part",
+  "parts": [
+    {
+      "part_id": "backend",
+      "name": "Backend API",
+      "root_path": "backend",
+      "project_type": "backend",
+      "tech_stack": ["FastAPI", "Python 3.11", "SQLAlchemy", "Celery", "APScheduler"]
+    },
+    {
+      "part_id": "frontend",
+      "name": "Web Dashboard",
+      "root_path": "frontend",
+      "project_type": "web",
+      "tech_stack": ["Next.js 15", "React 19", "TypeScript", "Tailwind", "React Query"]
+    },
+    {
+      "part_id": "infrastructure",
+      "name": "Infra Stack",
+      "root_path": "infrastructure",
+      "project_type": "infra",
+      "tech_stack": ["Docker Compose 3.8", "Postgres", "Redis", "Milvus", "MinIO", "etcd"]
+    }
+  ],
+  "integration_points": [
+    {"from": "frontend", "to": "backend", "type": "REST", "details": ["/api/dashboard", "/api/predictions", "/api/stocks", "/api/ab-test", "/api/models", "/api/auth"]},
+    {"from": "backend", "to": "postgres", "type": "SQLAlchemy", "details": ["users", "stocks", "news", "predictions", "evaluations"]},
+    {"from": "backend", "to": "redis", "type": "Cache/Broker", "details": ["Celery", "APScheduler"]},
+    {"from": "backend", "to": "milvus", "type": "VectorDB", "details": ["news embeddings", "prediction embeddings"]},
+    {"from": "backend", "to": "telegram", "type": "Webhook", "details": ["Alert notifications"]}
+  ]
+}

@@ -1,0 +1,126 @@
+<story-context id="context:1-1-provision-t3-small-host-bring-up-compose-stack" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>1.1</storyId>
+    <title>Provision t3.small host &amp; bring up Compose stack</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-12T02:54:28Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/Users/winter.e/easy-work/craveny/.bmad-ephemeral/stories/1-1-provision-t3-small-host-bring-up-compose-stack.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>solo infrastructure owner</asA>
+    <iWant>provision the EC2 t3.small host and bring up the Docker Compose data stack</iWant>
+    <soThat>all backend, frontend, and automation services can attach to stable Postgres/Redis/Milvus foundations for 24/7 use</soThat>
+    <tasks>
+      <task id="T1" ac="AC3" title="Prepare host prerequisites">
+        <subtask>Apply OS updates, install Docker 24.x and Compose &gt;=2.20, and configure at least 8 GB swap so Milvus workloads remain stable on t3.small.</subtask>
+        <subtask>Tighten security groups or UFW so only ports 80/443 plus the admin SSH range are reachable from the internet while Postgres, Redis, and Milvus stay internal.</subtask>
+        <subtask>Copy .env.example to .env, fill OPENAI/OPENROUTER/TELEGRAM and database credentials from SSM or Parameter Store, and verify overrides with &quot;docker compose config&quot;.</subtask>
+      </task>
+      <task id="T2" ac="AC1" title="Bring up Compose data stack">
+        <subtask>Run &quot;docker compose pull&quot; inside infrastructure/ to fetch Postgres, Redis, Milvus, MinIO, and etcd images.</subtask>
+        <subtask>Execute &quot;docker compose up -d&quot; and watch &quot;docker compose ps&quot; or health logs until each container reports healthy.</subtask>
+        <subtask>Capture evidence (container IDs, published ports, healthcheck logs) for docs/runbook updates and future audits.</subtask>
+      </task>
+      <task id="T3" ac="AC2" title="Validate persistence and idempotency">
+        <subtask>Restart key services with &quot;docker compose restart postgres redis milvus&quot; and ensure they return to healthy status within two minutes.</subtask>
+        <subtask>Run smoke commands such as &quot;psql -h localhost -U $POSTGRES_USER -c \&quot;\l\&quot;&quot;, &quot;redis-cli -p 6380 ping&quot;, and &quot;curl http://localhost:9091/healthz&quot; to confirm each dependency responds.</subtask>
+        <subtask>Document troubleshooting guidance (log file paths, disk usage checks, volume locations) in deployment docs for reuse.</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <items>
+      <criterion id="AC1">Compose stack bootstraps successfully: with Docker 24.x, Compose &gt;=2.20, and a populated .env, running &quot;cd infrastructure &amp;&amp; docker compose up -d&quot; must bring Postgres, Redis, Milvus, MinIO, and etcd containers to healthy status on ports 5432/6380/19530/9091/9000.</criterion>
+      <criterion id="AC2">Idempotent bring-up with persistent volumes: after docker compose down/up or targeted restarts, volumes postgres_data, milvus_data, minio_data, and etcd_data remount cleanly and healthchecks (pg_isready, redis-cli ping, Milvus /healthz) still pass without manual fixes.</criterion>
+      <criterion id="AC3">Host prerequisites and access hardening verified: diagnostics confirm Docker/Compose versions, secrets sourced from .env or SSM overrides, swap configuration is applied, and only 80/443 plus restricted SSH are exposed externally.</criterion>
+    </items>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/epics.md" title="craveny - Epic Breakdown" section="Epic 1 · Story 1.1">
+        <snippet>Epic 1.1 mandates bringing up Postgres, Redis, Milvus, MinIO, and etcd on a single t3.small host via infrastructure/docker-compose.yml with Docker 24/Compose 2.20 so data volumes materialize from .env configuration.</snippet>
+      </doc>
+      <doc path="docs/PRD.md" title="Product Requirements Document" section="Success Criteria">
+        <snippet>The PRD defines 24/7 availability on a single inexpensive EC2 node plus reproducible deployment scripts as success gates, making a deterministic Compose bring-up essential for stakeholders anywhere.</snippet>
+      </doc>
+      <doc path="docs/deployment-configuration.md" title="Deployment Configuration" section="Deployment Steps (Manual)">
+        <snippet>The deployment guide enumerates the manual workflow—git pull, update .env secrets, run docker-compose pull/up, then start backend/frontend—providing the authoritative runbook this story must concretize.</snippet>
+      </doc>
+      <doc path="docs/deployment-infrastructure.md" title="Deployment & Infrastructure Notes" section="Operational Checklist">
+        <snippet>The operational checklist stresses 8 GB swap on t3.small, security group hardening, and monitoring hooks before running docker-compose, directly feeding AC3 and the troubleshooting subtasks.</snippet>
+      </doc>
+      <doc path="docs/architecture.md" title="Architecture" section="Project Initialization">
+        <snippet>Architecture initialization instructs engineers to run docker-compose up -d before attaching FastAPI/Next.js, reinforcing that this story establishes the shared data plane for every later epic.</snippet>
+      </doc>
+      <doc path="README.md" title="Craveny README" section="인프라 서비스 시작">
+        <snippet>The README details the same compose commands plus health endpoints (API, Swagger, /health) and therefore serves as the quick reference users will follow when verifying AC1.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact path="infrastructure/docker-compose.yml" kind="compose-file" symbol="services.postgres/redis/milvus" lines="1-130">
+        <reason>Defines the canonical Postgres, Redis, Milvus, MinIO, and etcd services with healthchecks and persistent volumes that this story must boot and verify.</reason>
+      </artifact>
+      <artifact path="backend/api/health.py" kind="fastapi-router" symbol="router.get('/health')" lines="30-90">
+        <reason>Exposes the GET /health endpoint used to validate backend readiness once Compose services are up, giving concrete smoke-test targets.</reason>
+      </artifact>
+      <artifact path="scripts/init_db.py" kind="python-script" symbol="init_database()" lines="1-63">
+        <reason>Provides the reusable Postgres initialization routine (creates tables, confirms connectivity) that operators can run after AC1 succeeds.</reason>
+      </artifact>
+      <artifact path="scripts/init_milvus.py" kind="python-script" symbol="init_milvus()" lines="1-120">
+        <reason>Automates Milvus connection, collection creation, and index setup, ensuring embeddings storage is ready after Compose provisioning.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <ecosystem name="python" manifest="requirements.txt">
+        <package name="fastapi" version="0.104"/>
+        <package name="uvicorn" version="0.23"/>
+        <package name="sqlalchemy" version="2.x"/>
+        <package name="pymilvus" version="2.3"/>
+      </ecosystem>
+      <ecosystem name="node" manifest="frontend/package.json">
+        <package name="next" version="15.1.4"/>
+        <package name="react" version="19.0.0"/>
+        <package name="@tanstack/react-query" version="5.x"/>
+        <package name="tailwindcss" version="3.x"/>
+      </ecosystem>
+      <ecosystem name="docker" manifest="infrastructure/docker-compose.yml">
+        <package name="postgres" version="13-alpine"/>
+        <package name="redis" version="7-alpine"/>
+        <package name="milvusdb/milvus" version="v2.3.0"/>
+        <package name="minio/minio" version="latest"/>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <item>Hosting must remain on a single Ubuntu 22.04 EC2 t3.small with Docker 24.x and Compose ≥2.20; scaling beyond this violates the MVP cost guardrail. [Source: docs/architecture.md#deployment-architecture]</item>
+    <item>All secrets flow through `.env` backed by AWS SSM or Secrets Manager, and MinIO credentials must be rotated before exposure; hardcoded defaults are prohibited. [Source: docs/deployment-infrastructure.md#secrets--env]</item>
+    <item>Security groups/UFW must expose only ports 80/443 plus restricted SSH while DB/Redis/Milvus stay private; monitoring via CloudWatch `/health` alarms is mandatory for 24/7 SLA. [Source: docs/deployment-infrastructure.md#operational-checklist]</item>
+  </constraints>
+  <interfaces>
+    <interface name="GET /health" kind="REST endpoint" signature="GET /health → 200 {status, error}" path="backend/api/health.py">
+      Exposes a unified health probe hitting Postgres, Redis, and Milvus connections, enabling automated validation after Compose bring-up.
+    </interface>
+    <interface name="docker compose CLI" kind="Command" signature="docker compose up -d|restart|ps" path="infrastructure/docker-compose.yml">
+      Operators use the Compose CLI to orchestrate the defined services; this story formalizes the commands and verification flow.
+    </interface>
+  </interfaces>
+  <tests>
+    <standards>Use pytest for backend validation, curl/redis-cli/psql for infrastructure smoke tests, and adhere to the README test workflow (pytest, coverage, lint) so infra checks integrate with existing pipelines.</standards>
+    <locations>
+      <location>tests/</location>
+      <location>scripts/ (init_db.py, init_milvus.py)</location>
+      <location>backend/api/health.py</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1">Script a pytest or shell probe that runs `docker compose up -d`, waits for healthchecks, and asserts `docker compose ps --format` reports all services healthy.</idea>
+      <idea ac="AC2">Write an integration test that restarts Postgres/Redis/Milvus via `docker compose restart` and then calls `/health` plus `redis-cli ping` to confirm volumes and services rebound automatically.</idea>
+      <idea ac="AC3">Automate a host prerequisite check that inspects `docker --version`, `docker compose version`, swap settings, and security group openness before permitting deployments.</idea>
+    </ideas>
+  </tests>
+</story-context>
