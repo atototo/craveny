@@ -25,40 +25,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 세션이 유효한지 백엔드에 확인 (선택적)
-  try {
-    const checkResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/auth/me`, {
-      headers: {
-        Cookie: `craveny_session=${sessionCookie.value}`,
-      },
-    });
-
-    // 세션이 유효하지 않으면 로그인 페이지로 리다이렉트
-    if (!checkResponse.ok) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("redirect", pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-
-    // 관리자 전용 페이지 체크
-    if (pathname.startsWith("/admin/")) {
-      const userData = await checkResponse.json();
-
-      // 관리자가 아니면 대시보드로 리다이렉트
-      if (userData.role !== "admin") {
-        return NextResponse.redirect(new URL("/", request.url));
-      }
-    }
-
-    return NextResponse.next();
-  } catch (error) {
-    console.error("인증 확인 실패:", error);
-
-    // 에러 발생 시 로그인 페이지로 리다이렉트
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
+  // 세션 쿠키가 있으면 일단 통과
+  // 실제 인증 확인은 각 페이지나 API에서 수행
+  return NextResponse.next();
 }
 
 /**
