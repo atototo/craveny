@@ -25,6 +25,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: craveny-redis
+    volumes:
+      - redis_data:/data
+      - ./redis-init/dump.rdb:/data/dump.rdb
     ports:
       - "6380:6379"
     restart: unless-stopped
@@ -124,6 +127,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   milvus_data:
   etcd_data:
   minio_data:
