@@ -89,3 +89,11 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.turbo/
+
+# PM2
+ecosystem.config.js
+.pm2/
+logs/
+*.log
+backend.log
+frontend.log

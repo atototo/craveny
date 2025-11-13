@@ -1,0 +1,53 @@
+module.exports = {
+  apps: [
+    // Backend (FastAPI)
+    {
+      name: 'craveny-backend',
+      cwd: '/absolute/path/to/craveny',  // 실제 경로로 변경
+      script: 'uv',
+      args: 'run python -m backend.main',
+      interpreter: 'none',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '2G',
+      env: {
+        PYTHONUNBUFFERED: '1',
+      },
+      error_file: '/absolute/path/to/craveny/logs/backend-error.log',  // 실제 경로로 변경
+      out_file: '/absolute/path/to/craveny/logs/backend-out.log',  // 실제 경로로 변경
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+
+    // Frontend (Next.js)
+    {
+      name: 'craveny-frontend',
+      cwd: '/absolute/path/to/craveny/frontend',  // 실제 경로로 변경
+      script: 'npm',
+      args: 'run dev',
+      interpreter: 'none',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '1G',
+      env: {
+        PORT: '3030',
+        NODE_ENV: 'development',
+      },
+      error_file: '/absolute/path/to/craveny/logs/frontend-error.log',  // 실제 경로로 변경
+      out_file: '/absolute/path/to/craveny/logs/frontend-out.log',  // 실제 경로로 변경
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+
+    // ngrok
+    {
+      name: 'craveny-ngrok',
+      script: 'ngrok',
+      args: 'http 3030 --domain=craveny.ngrok.app',  // 실제 ngrok 도메인으로 변경
+      interpreter: 'none',
+      autorestart: true,
+      watch: false,
+      error_file: '/absolute/path/to/craveny/logs/ngrok-error.log',  // 실제 경로로 변경
+      out_file: '/absolute/path/to/craveny/logs/ngrok-out.log',  // 실제 경로로 변경
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+  ],
+};

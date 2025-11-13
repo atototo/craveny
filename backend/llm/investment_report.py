@@ -145,7 +145,12 @@ class InvestmentReportGenerator:
 
             # 4. 응답 파싱
             result_text = response.choices[0].message.content
-            result = json.loads(result_text)
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON 파싱 실패: {e}")
+                logger.error(f"응답 내용 (처음 500자): {result_text[:500]}")
+                return self._empty_report()
 
             logger.info(
                 f"투자 리포트 생성 완료: {stock_code} "
@@ -604,12 +609,15 @@ class InvestmentReportGenerator:
         # MACD 분석
         macd = technical.get("macd")
         if macd:
-            macd_signal = macd.get("signal_type", "중립")
+            macd_signal = macd.get("signal_type") or "중립"
             macd_emoji = "📈" if macd_signal == "상승" else "📉" if macd_signal == "하락" else "➡️"
+            macd_line = macd.get('macd_line') or 0
+            signal_line = macd.get('signal_line') or 0
+            histogram = macd.get('histogram') or 0
             sections.append(f"""### MACD 분석 ({macd_emoji} {macd_signal})
-- MACD: {macd.get('macd_line', 0):.2f}
-- Signal: {macd.get('signal_line', 0):.2f}
-- Histogram: {macd.get('histogram', 0):.2f}""")
+- MACD: {macd_line:.2f}
+- Signal: {signal_line:.2f}
+- Histogram: {histogram:.2f}""")
 
         # 가격 모멘텀
         momentum = technical.get("price_momentum")
@@ -673,40 +681,64 @@ class InvestmentReportGenerator:
             report_data = self._prepare_report_data(stock_code, predictions, current_price)
             prompt = self._build_prompt(report_data)
 
-            logger.info(f"A/B 종합 리포트 생성: {stock_code} ({len(predictions)}건 분석)")
+            logger.info(f"A/B 종합 리포트 생성: {stock_code} ({len(predictions)}건 분석) - 병렬 호출")
 
-            # Model A (GPT-4o) 호출
-            response_a = self.client_a.chat.completions.create(
-                model=self.model_a,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "당신은 한국 주식 시장의 베테랑 애널리스트입니다. 데이터 기반으로 명확하고 실용적인 투자 리포트를 작성합니다.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.4,
-                max_tokens=1000,
-                response_format={"type": "json_object"},
-            )
+            # ⚡ 병렬 LLM 호출 (시간 절반 단축: 60초 → 30초)
+            import concurrent.futures
 
-            result_a = json.loads(response_a.choices[0].message.content)
-            result_a["model"] = self.model_a
-            result_a["provider"] = settings.MODEL_A_PROVIDER
+            def call_model_a():
+                """Model A 호출"""
+                return self.client_a.chat.completions.create(
+                    model=self.model_a,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 한국 주식 시장의 베테랑 애널리스트입니다. 데이터 기반으로 명확하고 실용적인 투자 리포트를 작성합니다.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.4,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
+                )
 
-            # Model B (DeepSeek) 호출
-            response_b = self.client_b.chat.completions.create(
-                model=self.model_b,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "당신은 한국 주식 시장의 베테랑 애널리스트입니다. 데이터 기반으로 명확하고 실용적인 투자 리포트를 작성합니다. 반드시 유효한 JSON 형식으로만 응답하세요. 추가 설명이나 마크다운 없이 순수 JSON 객체만 반환하세요.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.4,
-                max_tokens=1000,
-            )
+            def call_model_b():
+                """Model B 호출"""
+                return self.client_b.chat.completions.create(
+                    model=self.model_b,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "당신은 한국 주식 시장의 베테랑 애널리스트입니다. 데이터 기반으로 명확하고 실용적인 투자 리포트를 작성합니다. 반드시 유효한 JSON 형식으로만 응답하세요. 추가 설명이나 마크다운 없이 순수 JSON 객체만 반환하세요.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.4,
+                    max_tokens=1000,
+                )
+
+            # 두 모델을 동시에 호출
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future_a = executor.submit(call_model_a)
+                future_b = executor.submit(call_model_b)
+
+                # 결과 대기
+                response_a = future_a.result()
+                response_b = future_b.result()
+
+            # Model A 파싱
+            try:
+                result_a = json.loads(response_a.choices[0].message.content)
+                result_a["model"] = self.model_a
+                result_a["provider"] = settings.MODEL_A_PROVIDER
+            except json.JSONDecodeError as e:
+                logger.error(f"Model A JSON 파싱 실패: {e}")
+                logger.error(f"응답 내용 (처음 500자): {response_a.choices[0].message.content[:500]}")
+                result_a = self._empty_report()
+                result_a["model"] = self.model_a
+                result_a["provider"] = settings.MODEL_A_PROVIDER
+
+            # Model B 파싱
 
             result_b_text = response_b.choices[0].message.content
 

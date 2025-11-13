@@ -321,21 +321,36 @@ export default function StockDetailPage() {
     try {
       const response = await fetch(`/api/reports/force-update/${stockCode}`, {
         method: "POST",
+        signal: AbortSignal.timeout(120000), // 2분 타임아웃
+        // Next.js의 기본 캐시를 비활성화하여 항상 새 요청
+        cache: 'no-store',
       });
 
       const result = await response.json();
 
       if (result.success) {
-        setUpdateMessage({
-          type: 'success',
-          text: result.message
-        });
+        // 백엔드에서 생성된 리포트 데이터를 직접 받아서 적용
+        if (result.analysis_summary && stock) {
+          setStock({
+            ...stock,
+            analysis_summary: result.analysis_summary
+          });
 
-        // 데이터 새로고침
-        const stockResponse = await fetch(`/api/stocks/${stockCode}`);
-        if (stockResponse.ok) {
-          const stockData = await stockResponse.json();
-          setStock(stockData);
+          setUpdateMessage({
+            type: 'success',
+            text: '리포트가 성공적으로 업데이트되었습니다.'
+          });
+        } else {
+          // analysis_summary가 없으면 페이지 전체 새로고침
+          const stockResponse = await fetch(`/api/stocks/${stockCode}`);
+          if (stockResponse.ok) {
+            const stockData = await stockResponse.json();
+            setStock(stockData);
+            setUpdateMessage({
+              type: 'success',
+              text: '리포트가 성공적으로 업데이트되었습니다.'
+            });
+          }
         }
       } else {
         setUpdateMessage({

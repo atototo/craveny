@@ -192,11 +192,17 @@ async def force_update_single_stock(
 
         if result:
             logger.info(f"✅ 종목 {stock_code} 리포트 업데이트 성공")
+
+            # 생성된 리포트 데이터를 직접 반환
+            from backend.services.stock_analysis_service import get_stock_analysis_summary
+            updated_summary = get_stock_analysis_summary(stock_code, db)
+
             return {
                 "success": True,
                 "message": f"종목 {stock_code} 리포트가 성공적으로 업데이트되었습니다.",
                 "last_updated": result.last_updated.isoformat() if result.last_updated else None,
-                "prediction_count": result.based_on_prediction_count
+                "prediction_count": result.based_on_prediction_count,
+                "analysis_summary": updated_summary  # 생성된 리포트 데이터 포함
             }
         else:
             logger.warning(f"❌ 종목 {stock_code} 리포트 업데이트 실패")
