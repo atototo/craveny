@@ -97,3 +97,9 @@ logs/
 *.log
 backend.log
 frontend.log
+
+# Development/Test Scripts
+check_*.py
+generate_*.py
+test_*.py
+test_*.json
