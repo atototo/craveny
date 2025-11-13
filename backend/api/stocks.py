@@ -410,48 +410,43 @@ async def get_stock_detail(
                 opinion_confidence = max(up_ratio, down_ratio)
 
         # Phase 2: LLM 기반 AI 투자 분석 요약 조회
-        # 캐시된 분석 요약이 있으면 사용, 없으면 생성
+        # 캐시된 분석 요약이 있으면 사용, 없으면 fallback 메시지만 표시 (자동 생성 제거)
         analysis_summary = get_stock_analysis_summary(stock_code, db)
 
         if not analysis_summary:
-            # 분석 요약 생성 (비동기 처리)
-            logger.info(f"종목 {stock_code}의 분석 요약이 없어 생성을 시도합니다.")
-            summary_obj = await update_stock_analysis_summary(stock_code, db, force_update=False)
+            # 자동 생성하지 않고 기본 메시지만 표시
+            logger.info(f"종목 {stock_code}의 분석 요약이 없습니다. 리포트 업데이트 버튼을 눌러주세요.")
 
-            if summary_obj:
-                analysis_summary = get_stock_analysis_summary(stock_code, db)
-            else:
-                # LLM 생성 실패 시 기본 규칙 기반 요약 사용 (fallback)
-                logger.warning(f"종목 {stock_code}의 LLM 분석 생성 실패, 규칙 기반 요약 사용")
-                analysis_summary = _generate_investment_summary(
-                    total_predictions=total_predictions,
-                    direction_distribution=direction_distribution,
-                    avg_confidence=avg_confidence,
-                    confidence_breakdown_avg=confidence_breakdown_avg,
-                    pattern_analysis_avg=pattern_analysis_avg,
-                    investment_opinion=investment_opinion,
-                )
-                # 규칙 기반 요약을 LLM 형식에 맞게 변환
-                analysis_summary = {
-                    "overall_summary": analysis_summary.get("overall_summary"),
-                    "short_term_scenario": analysis_summary.get("short_term_outlook"),
-                    "medium_term_scenario": analysis_summary.get("medium_term_outlook"),
-                    "long_term_scenario": analysis_summary.get("long_term_outlook"),
-                    "risk_factors": analysis_summary.get("risk_factors", []),
-                    "opportunity_factors": analysis_summary.get("opportunity_factors", []),
-                    "recommendation": analysis_summary.get("recommendation"),
-                    "statistics": {
-                        "total_predictions": total_predictions,
-                        "up_count": direction_distribution["up"],
-                        "down_count": direction_distribution["down"],
-                        "hold_count": direction_distribution["hold"],
-                        "avg_confidence": round(avg_confidence * 100, 1) if avg_confidence else None,
-                    },
-                    "meta": {
-                        "last_updated": None,
-                        "based_on_prediction_count": total_predictions,
-                    }
+            # 기본 규칙 기반 요약 사용 (fallback)
+            analysis_summary = _generate_investment_summary(
+                total_predictions=total_predictions,
+                direction_distribution=direction_distribution,
+                avg_confidence=avg_confidence,
+                confidence_breakdown_avg=confidence_breakdown_avg,
+                pattern_analysis_avg=pattern_analysis_avg,
+                investment_opinion=investment_opinion,
+            )
+            # 규칙 기반 요약을 LLM 형식에 맞게 변환
+            analysis_summary = {
+                "overall_summary": analysis_summary.get("overall_summary"),
+                "short_term_scenario": analysis_summary.get("short_term_outlook"),
+                "medium_term_scenario": analysis_summary.get("medium_term_outlook"),
+                "long_term_scenario": analysis_summary.get("long_term_outlook"),
+                "risk_factors": analysis_summary.get("risk_factors", []),
+                "opportunity_factors": analysis_summary.get("opportunity_factors", []),
+                "recommendation": analysis_summary.get("recommendation"),
+                "statistics": {
+                    "total_predictions": total_predictions,
+                    "up_count": direction_distribution["up"],
+                    "down_count": direction_distribution["down"],
+                    "hold_count": direction_distribution["hold"],
+                    "avg_confidence": round(avg_confidence * 100, 1) if avg_confidence else None,
+                },
+                "meta": {
+                    "last_updated": None,
+                    "based_on_prediction_count": total_predictions,
                 }
+            }
 
         # 시간대별 현재가 조회
         current_price = await get_current_price(stock_code, db)

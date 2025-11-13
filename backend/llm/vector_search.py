@@ -4,6 +4,7 @@
 Milvus에서 유사한 과거 뉴스를 검색하고, 해당 뉴스의 주가 변동률을 조회합니다.
 """
 import logging
+import threading
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -54,6 +55,10 @@ class NewsVectorSearch:
                 ...
             ]
         """
+        # 스레드별 고유 alias 생성 (멀티스레드 환경에서 충돌 방지)
+        thread_id = threading.get_ident()
+        alias = f"search_{thread_id}"
+
         try:
             # 1. 뉴스 텍스트 임베딩
             embedding = self.embedder.embed_text(news_text)
@@ -61,15 +66,20 @@ class NewsVectorSearch:
                 logger.error("뉴스 임베딩 생성 실패")
                 return []
 
-            # 2. Milvus 연결
-            connections.connect(
-                alias="search",
-                host=settings.MILVUS_HOST,
-                port=settings.MILVUS_PORT,
-            )
+            # 2. Milvus 연결 (이미 연결되어 있으면 재사용)
+            try:
+                connections.connect(
+                    alias=alias,
+                    host=settings.MILVUS_HOST,
+                    port=settings.MILVUS_PORT,
+                )
+            except Exception as e:
+                # 이미 연결되어 있으면 무시
+                if "already exist" not in str(e).lower():
+                    raise
 
             # 3. 컬렉션 로드
-            collection = Collection(self.collection_name, using="search")
+            collection = Collection(self.collection_name, using=alias)
             collection.load()
 
             # 4. 검색 파라미터 설정
@@ -122,7 +132,7 @@ class NewsVectorSearch:
 
         finally:
             try:
-                connections.disconnect("search")
+                connections.disconnect(alias)
             except Exception:
                 pass
 
