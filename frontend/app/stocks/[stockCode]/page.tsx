@@ -500,7 +500,7 @@ export default function StockDetailPage() {
 
             {/* A/B Test Mode: Side-by-side comparison */}
             {stock.analysis_summary.ab_test_enabled && stock.analysis_summary.model_a && stock.analysis_summary.model_b ? (
-              <div className="flex gap-6">
+              <div className="flex flex-col md:flex-row gap-6">
                 {/* Model A - Dynamic name from A/B config */}
                 {renderModelSummary(
                   stock.analysis_summary.model_a,
