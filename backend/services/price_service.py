@@ -3,9 +3,11 @@
 
 시간대에 따라 적절한 가격을 반환합니다:
 - 장중 (09:00~15:30): KIS API 실시간 조회 (시가/고가/저가 포함)
-- 장전 시간외 (08:30~09:00): 시간외 가격 (StockOvertimePrice)
-- 장후 시간외 (15:30~18:00): 시간외 가격 (StockOvertimePrice)
+- 장전 시간외 (08:30~09:00): KIS API 실시간 시간외 조회 → DB fallback
+- 장후 시간외 (15:30~18:00): KIS API 실시간 시간외 조회 → DB fallback
 - 기타 시간: 전일 종가 (StockPrice)
+
+주의: 실시간 시간외 조회는 실전투자 API만 지원 (모의투자 미지원)
 """
 import logging
 import asyncio
@@ -106,12 +108,18 @@ class PriceService:
             if market_status == 'market':
                 return await cls._get_realtime_price_async(stock_code, db, today)
 
-            # 2. 시간외 (장전/장후): 시간외 가격
+            # 2. 시간외 (장전/장후): 실시간 시간외 가격 API 조회
             if market_status in ['pre_market', 'post_market']:
+                # 실시간 시간외 가격 조회 시도 (실전투자 API 필요)
+                realtime_overtime = await cls._get_realtime_overtime_price_async(stock_code, market_status)
+                if realtime_overtime:
+                    return realtime_overtime
+
+                # API 실패 시 DB에서 조회 (fallback)
+                logger.info(f"실시간 시간외 API 실패, DB 조회로 fallback: {stock_code}")
                 overtime_price = cls._get_overtime_price(stock_code, db, today)
                 if overtime_price:
                     return overtime_price
-                # 시간외 가격 없으면 전일 종가로 fallback
 
             # 3. 장마감 또는 시간외 가격 없을 때: 전일 종가
             return cls._get_latest_close_price(stock_code, db)
@@ -198,6 +206,72 @@ class PriceService:
 
         # DB에도 없으면 전일 종가
         return cls._get_latest_close_price(stock_code, db)
+
+    @classmethod
+    async def _get_realtime_overtime_price_async(
+        cls,
+        stock_code: str,
+        market_status: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        실시간 시간외 가격 조회 (KIS API 직접 호출)
+
+        주의: 실전투자 API만 지원 (모의투자 미지원)
+
+        Args:
+            stock_code: 종목 코드
+            market_status: 시장 상태 ('pre_market' 또는 'post_market')
+
+        Returns:
+            가격 정보 딕셔너리 또는 None
+        """
+        try:
+            # KIS API 호출 (async)
+            kis_client = get_kis_client()
+
+            # 모의투자 모드면 바로 None 반환 (실전투자만 지원)
+            if settings.KIS_MOCK_MODE:
+                logger.debug(f"시간외 실시간 조회는 실전투자만 지원 (모의투자 모드: {stock_code})")
+                return None
+
+            response = await kis_client.get_overtime_price(stock_code)
+
+            # 응답 파싱
+            if response and response.get("rt_cd") == "0":
+                output = response.get("output", {})
+
+                # 가격 데이터 파싱
+                ovtm_untp_prpr = float(output.get("ovtm_untp_prpr", 0))  # 시간외 단일가 현재가
+                ovtm_untp_prdy_vrss = float(output.get("ovtm_untp_prdy_vrss", 0))  # 전일 대비
+                ovtm_untp_prdy_ctrt = float(output.get("ovtm_untp_prdy_ctrt", 0))  # 전일 대비율
+                prdy_vrss_sign = output.get("prdy_vrss_sign", "3")  # 전일 대비 부호
+                acml_vol = int(output.get("acml_vol", 0))  # 누적 거래량
+                acml_tr_pbmn = int(output.get("acml_tr_pbmn", 0))  # 누적 거래대금
+
+                logger.info(f"✅ 실시간 시간외 가격 조회 성공: {stock_code} = {ovtm_untp_prpr}원 ({market_status})")
+
+                return {
+                    "close": ovtm_untp_prpr,
+                    "price": ovtm_untp_prpr,  # backward compatibility
+                    "open": None,  # 시간외 데이터에는 시가 정보 없음
+                    "high": None,
+                    "low": None,
+                    "change": ovtm_untp_prdy_vrss,
+                    "change_rate": ovtm_untp_prdy_ctrt,
+                    "change_sign": prdy_vrss_sign,
+                    "volume": acml_vol,
+                    "trading_value": acml_tr_pbmn,
+                    "datetime": datetime.now().isoformat(),
+                    "source": "kis_api_realtime_overtime",
+                    "market_status": market_status,
+                }
+            else:
+                logger.warning(f"KIS 시간외 API 응답 실패: {response}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"KIS 시간외 API 호출 실패 ({stock_code}): {e}")
+            return None
 
     @classmethod
     def _get_overtime_price(
