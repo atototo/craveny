@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from backend.db.session import get_db
 from backend.db.models.stock import Stock
 
-router = APIRouter(prefix="/admin/stocks", tags=["stock-management"])
+router = APIRouter(prefix="/api/admin/stocks", tags=["stock-management"])
 
 
 # Request/Response Models
