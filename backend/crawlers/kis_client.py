@@ -30,11 +30,15 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests = []
-        self.lock = asyncio.Lock()
+        self._lock = None  # Lazy initialization to avoid event loop binding issues
 
     async def acquire(self):
         """Rate limit 획득 (필요 시 대기)"""
-        async with self.lock:
+        # Lazy initialization: Lock 생성 (event loop가 실행 중일 때만)
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        async with self._lock:
             now = time.time()
 
             # 시간 창 밖의 요청 제거
@@ -68,7 +72,7 @@ class TokenManager:
     """OAuth 2.0 Token 관리자 (싱글톤, Redis 기반)"""
 
     _instance = None
-    _lock = asyncio.Lock()
+    _lock = None  # Lazy initialization to avoid event loop binding issues
     REDIS_KEY = "kis:access_token"
     REDIS_EXPIRY_KEY = "kis:token_expires_at"
 
@@ -108,6 +112,10 @@ class TokenManager:
         Returns:
             유효한 Access Token
         """
+        # Lazy initialization: Lock 생성 (event loop가 실행 중일 때만)
+        if TokenManager._lock is None:
+            TokenManager._lock = asyncio.Lock()
+
         async with TokenManager._lock:
             try:
                 # Redis에서 토큰 조회
