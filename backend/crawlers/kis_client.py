@@ -903,6 +903,78 @@ class KISClient:
             params=params
         )
 
+    async def get_top_movers(
+        self,
+        market: str = "0000",
+        sort_type: str = "0",
+        count: int = 30
+    ) -> Dict[str, Any]:
+        """
+        등락률 순위 조회 (실시간)
+
+        Args:
+            market: 시장 구분
+                - "0000": 전체
+                - "0001": 코스피
+                - "1001": 코스닥
+            sort_type: 정렬 구분
+                - "0": 상승율순
+                - "1": 하락율순
+                - "2": 시가대비상승율
+                - "3": 시가대비하락율
+            count: 조회 건수 (최대 30건)
+
+        Returns:
+            등락률 순위 데이터 (JSON)
+
+        Example Response:
+            {
+                "rt_cd": "0",
+                "output": [
+                    {
+                        "stck_shrn_iscd": "005930",  # 종목코드
+                        "data_rank": "1",  # 순위
+                        "hts_kor_isnm": "삼성전자",  # 종목명
+                        "stck_prpr": "70000",  # 현재가
+                        "prdy_vrss": "2000",  # 전일대비
+                        "prdy_vrss_sign": "2",  # 전일대비부호 (2:상승, 5:하락)
+                        "prdy_ctrt": "2.94",  # 전일대비율
+                        "acml_vol": "12345678"  # 거래량
+                    }
+                ]
+            }
+        """
+        # TR_ID: FHPST01700000 (실전 전용, 모의투자 미지원)
+        if self.mock_mode:
+            logger.warning("⚠️  등락률 순위 API는 모의투자에서 지원되지 않습니다.")
+            return {"rt_cd": "1", "msg1": "모의투자 미지원", "output": []}
+
+        tr_id = "FHPST01700000"
+
+        params = {
+            "fid_cond_mrkt_div_code": "J",  # 시장 구분 (J: KRX)
+            "fid_cond_scr_div_code": "20170",  # 화면 구분 코드
+            "fid_input_iscd": market,  # 종목 코드 (0000: 전체)
+            "fid_rank_sort_cls_code": sort_type,  # 정렬 구분
+            "fid_input_cnt_1": "0",  # 누적 일수 (0: 전체)
+            "fid_prc_cls_code": "0",  # 가격 구분 (0: 전체)
+            "fid_input_price_1": "",  # 가격 하한
+            "fid_input_price_2": "",  # 가격 상한
+            "fid_vol_cnt": "",  # 거래량 하한
+            "fid_trgt_cls_code": "0",  # 대상 구분 (0: 전체)
+            "fid_trgt_exls_cls_code": "0",  # 대상 제외 구분 (0: 전체)
+            "fid_div_cls_code": "0",  # 분류 구분 (0: 전체)
+            "fid_rsfl_rate1": "",  # 등락률 하한
+            "fid_rsfl_rate2": ""  # 등락률 상한
+        }
+
+        return await self.request(
+            method="GET",
+            endpoint="/uapi/domestic-stock/v1/ranking/fluctuation",
+            tr_id=tr_id,
+            params=params
+        )
+
     async def close(self):
         """리소스 정리"""
         logger.info("KIS API Client 종료")

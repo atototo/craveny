@@ -750,9 +750,38 @@ export default function StockDetailPage() {
                   <div className="p-4 bg-gray-50">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="font-medium text-gray-900 mb-2">{news.title}</h3>
+                        {/* 보수적 버전: 제목 대신 시그널 표시 */}
+                        <div className="flex items-center gap-2 mb-2">
+                          {news.prediction?.sentiment_direction === 'positive' && (
+                            <span className="text-lg">📈</span>
+                          )}
+                          {news.prediction?.sentiment_direction === 'negative' && (
+                            <span className="text-lg">📉</span>
+                          )}
+                          {news.prediction?.sentiment_direction === 'neutral' && (
+                            <span className="text-lg">➡️</span>
+                          )}
+                          {!news.prediction?.sentiment_direction && (
+                            <span className="text-lg">📊</span>
+                          )}
+                          <h3 className="font-medium text-gray-900">
+                            {news.prediction?.sentiment_direction === 'positive' && '긍정적 시장 시그널'}
+                            {news.prediction?.sentiment_direction === 'negative' && '부정적 시장 시그널'}
+                            {news.prediction?.sentiment_direction === 'neutral' && '중립적 시장 시그널'}
+                            {!news.prediction?.sentiment_direction && '시장 정보'}
+                          </h3>
+                        </div>
                         <div className="flex items-center gap-3 text-sm text-gray-600">
-                          <span>📰 {news.source}</span>
+                          {/* 출처 카테고리화 */}
+                          <span>
+                            📰 {
+                              news.source.includes('DART') || news.source.includes('금융감독')
+                                ? '공식공시'
+                                : news.source.includes('증권') || news.source.includes('리서치')
+                                ? '증권리포트'
+                                : '언론매체'
+                            }
+                          </span>
                           {isMounted && news.published_at && (
                             <span>
                               🕐 {new Date(news.published_at).toLocaleString("ko-KR")}

@@ -8,11 +8,14 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from backend.db.session import SessionLocal
 from backend.db.models.news import NewsArticle
+from backend.db.models.stock import Stock, StockPrice
+from backend.db.models.market_data import StockCurrentPrice, InvestorTrading, StockInfo
+from backend.db.models.prediction import Prediction
 from backend.scheduler.crawler_scheduler import get_crawler_scheduler
 
 
@@ -216,6 +219,223 @@ async def force_update_single_stock(
         return {
             "success": False,
             "message": f"오류 발생: {str(e)}"
+        }
+
+
+@router.get("/dashboard/data-check")
+async def check_data_availability(db: Session = Depends(get_db)):
+    """데이터 존재 여부 확인"""
+    try:
+        stock_prices_count = db.query(func.count(StockPrice.id)).scalar()
+        predictions_count = db.query(func.count(Prediction.id)).scalar()
+        investor_count = db.query(func.count(InvestorTrading.id)).scalar()
+
+        latest_price = db.query(StockPrice).order_by(StockPrice.date.desc()).first()
+        latest_prediction = db.query(Prediction).order_by(Prediction.created_at.desc()).first()
+        latest_investor = db.query(InvestorTrading).order_by(InvestorTrading.date.desc()).first()
+
+        # 최신 주가 데이터 샘플 (종목별 최신 데이터)
+        subq = db.query(
+            StockPrice.stock_code,
+            func.max(StockPrice.date).label('max_date')
+        ).group_by(StockPrice.stock_code).subquery()
+
+        latest_prices = db.query(StockPrice).join(
+            subq,
+            (StockPrice.stock_code == subq.c.stock_code) &
+            (StockPrice.date == subq.c.max_date)
+        ).limit(5).all()
+
+        sample_prices = []
+        for p in latest_prices:
+            sample_prices.append({
+                "stock_code": p.stock_code,
+                "date": p.date.isoformat(),
+                "open": p.open,
+                "close": p.close,
+                "has_open": p.open is not None and p.open > 0
+            })
+
+        return {
+            "stock_prices": {
+                "count": stock_prices_count,
+                "latest_date": latest_price.date.isoformat() if latest_price else None
+            },
+            "predictions": {
+                "count": predictions_count,
+                "latest_date": latest_prediction.created_at.isoformat() if latest_prediction else None
+            },
+            "investor_trading": {
+                "count": investor_count,
+                "latest_date": latest_investor.date.isoformat() if latest_investor else None
+            },
+            "sample_latest_prices": sample_prices,
+            "total_latest_stocks": db.query(func.count(func.distinct(StockPrice.stock_code))).scalar()
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/dashboard/market-momentum")
+async def get_market_momentum(db: Session = Depends(get_db)):
+    """
+    실시간 시장 모멘텀 데이터 (KIS API 기반)
+
+    급등/급락 종목, 투자자 동향, AI 시그널 등을 반환합니다.
+    """
+    try:
+        from backend.crawlers.kis_client import get_kis_client
+        from backend.utils.stock_mapping import get_stock_mapper
+
+        stock_mapper = get_stock_mapper()
+
+        # KIS API Client
+        kis_client = await get_kis_client()
+
+        # 1. 급등/급락 종목 조회 (변동율순 - 급등/급락 모두 포함)
+        movers_response = await kis_client.get_top_movers(
+            market="0000",  # 전체 시장
+            sort_type="4"   # 변동율 (변동폭이 큰 순서)
+        )
+
+        def process_stock(stock):
+            """종목 데이터 처리"""
+            stock_code = stock["stck_shrn_iscd"]
+            change_rate = float(stock["prdy_ctrt"])
+
+            # AI 시그널 조회 (우리 DB)
+            positive_signals = db.query(func.count(Prediction.id)).filter(
+                Prediction.stock_code == stock_code,
+                Prediction.sentiment_direction == 'positive'
+            ).scalar() or 0
+
+            negative_signals = db.query(func.count(Prediction.id)).filter(
+                Prediction.stock_code == stock_code,
+                Prediction.sentiment_direction == 'negative'
+            ).scalar() or 0
+
+            avg_sentiment = db.query(func.avg(Prediction.sentiment_score)).filter(
+                Prediction.stock_code == stock_code,
+                Prediction.sentiment_score.isnot(None)
+            ).scalar()
+
+            return {
+                'stock_code': stock_code,
+                'stock_name': stock["hts_kor_isnm"],
+                'change_rate': change_rate,
+                'current_price': int(stock["stck_prpr"]),
+                'ai_signals': positive_signals + negative_signals,
+                'positive_signals': positive_signals,
+                'negative_signals': negative_signals,
+                'confidence': int(avg_sentiment * 100) if avg_sentiment else None
+            }
+
+        # 변동율순 데이터를 급등/급락으로 분리
+        all_movers = []
+        if movers_response.get("rt_cd") == "0":
+            for stock in movers_response.get("output", []):
+                all_movers.append(process_stock(stock))
+
+        # 급등/급락 분리
+        gainers = sorted([m for m in all_movers if m['change_rate'] > 0],
+                        key=lambda x: x['change_rate'], reverse=True)
+        losers = sorted([m for m in all_movers if m['change_rate'] < 0],
+                       key=lambda x: x['change_rate'])
+
+        top_gainers = gainers[:5]
+        top_losers = losers[:5]
+
+        # 2. 투자자 동향 (최근 데이터)
+        # 종목별 가장 최근 데이터 조회
+        investor_subq = db.query(
+            InvestorTrading.stock_code,
+            func.max(InvestorTrading.date).label('max_date')
+        ).group_by(InvestorTrading.stock_code).subquery()
+
+        investor_data = db.query(InvestorTrading).join(
+            investor_subq,
+            (InvestorTrading.stock_code == investor_subq.c.stock_code) &
+            (InvestorTrading.date == investor_subq.c.max_date)
+        ).all()
+
+        # 종목별 외국인/기관 순매수 집계
+        foreign_net = {}
+        institution_net = {}
+
+        for data in investor_data:
+            stock_name = stock_mapper.get_company_name(data.stock_code)
+            if data.frgn_ntby_tr_pbmn:
+                foreign_net[data.stock_code] = {
+                    'name': stock_name or data.stock_code,
+                    'amount': data.frgn_ntby_tr_pbmn
+                }
+            if data.orgn_ntby_tr_pbmn:
+                institution_net[data.stock_code] = {
+                    'name': stock_name or data.stock_code,
+                    'amount': data.orgn_ntby_tr_pbmn
+                }
+
+        # 상위 3개씩
+        top_foreign = sorted(foreign_net.items(),
+                           key=lambda x: x[1]['amount'], reverse=True)[:3]
+        top_institution = sorted(institution_net.items(),
+                                key=lambda x: x[1]['amount'], reverse=True)[:3]
+
+        # 3. AI 시그널이 많은 종목 TOP 5 (섹터 대신)
+        # 전체 기간 AI 시그널 많은 종목
+        signal_counts = db.query(
+            Prediction.stock_code,
+            func.count(Prediction.id).label('total'),
+            func.sum(case(
+                (Prediction.sentiment_direction == 'positive', 1),
+                else_=0
+            )).label('positive'),
+            func.sum(case(
+                (Prediction.sentiment_direction == 'negative', 1),
+                else_=0
+            )).label('negative')
+        ).group_by(
+            Prediction.stock_code
+        ).order_by(
+            func.count(Prediction.id).desc()
+        ).limit(5).all()
+
+        sector_trends = []
+        for row in signal_counts:
+            stock_name = stock_mapper.get_company_name(row.stock_code)
+            sentiment = 'positive' if row.positive > row.negative else 'negative'
+            sector_trends.append({
+                'sector': stock_name or row.stock_code,  # 종목명을 섹터처럼 표시
+                'positive_signals': row.positive or 0,
+                'negative_signals': row.negative or 0,
+                'total_signals': row.total,
+                'sentiment': sentiment
+            })
+
+        return {
+            'top_gainers': top_gainers,
+            'top_losers': top_losers,
+            'foreign_buying': [
+                {'stock_code': code, 'stock_name': data['name'], 'amount': data['amount']}
+                for code, data in top_foreign
+            ],
+            'institution_buying': [
+                {'stock_code': code, 'stock_name': data['name'], 'amount': data['amount']}
+                for code, data in top_institution
+            ],
+            'sector_trends': sector_trends
+        }
+
+    except Exception as e:
+        logger.error(f"시장 모멘텀 조회 실패: {e}", exc_info=True)
+        # 에러 시 빈 데이터 반환
+        return {
+            'top_gainers': [],
+            'top_losers': [],
+            'foreign_buying': [],
+            'institution_buying': [],
+            'sector_trends': []
         }
 
 

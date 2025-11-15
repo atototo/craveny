@@ -3,40 +3,46 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-interface NewsItem {
-  id: number;
-  title: string;
+interface Mover {
   stock_code: string;
   stock_name: string;
-  notified_at: string;
-  source: string;
+  change_rate: number;
+  current_price: number;
+  ai_signals: number;
+  positive_signals: number;
+  negative_signals: number;
+  confidence: number | null;
 }
 
-interface HotStock {
+interface InvestorBuying {
   stock_code: string;
   stock_name: string;
-  news_count: number;
-  notification_count: number;
+  amount: number;
+}
+
+interface SectorTrend {
+  sector: string;
+  positive_signals: number;
+  negative_signals: number;
+  total_signals: number;
+  sentiment: string;
+}
+
+interface MarketMomentum {
+  top_gainers: Mover[];
+  top_losers: Mover[];
+  foreign_buying: InvestorBuying[];
+  institution_buying: InvestorBuying[];
+  sector_trends: SectorTrend[];
 }
 
 export default function Home() {
-  const [latestAlerts, setLatestAlerts] = useState<NewsItem[]>([]);
-  const [hotStocks, setHotStocks] = useState<HotStock[]>([]);
+  const [momentum, setMomentum] = useState<MarketMomentum | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 최신 투자 알림 조회
-    fetch("/api/news?notified=true&sort_by=notified_at&sort_order=desc&limit=10")
-      .then((res) => res.json())
-      .then((data) => {
-        setLatestAlerts(data.items || []);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch latest alerts:", err);
-      });
-
-    // 오늘의 HOT 종목 조회
-    fetch("/api/stocks/summary")
+    // 시장 모멘텀 조회
+    fetch("/api/dashboard/market-momentum")
       .then((res) => {
         if (!res.ok) {
           throw new Error(`HTTP error! status: ${res.status}`);
@@ -44,18 +50,11 @@ export default function Home() {
         return res.json();
       })
       .then((data) => {
-        // 뉴스가 많은 상위 5개 종목
-        if (Array.isArray(data)) {
-          setHotStocks(data.slice(0, 5));
-        } else {
-          console.error("Expected array but got:", typeof data);
-          setHotStocks([]);
-        }
+        setMomentum(data);
         setLoading(false);
       })
       .catch((err) => {
-        console.error("Failed to fetch hot stocks:", err);
-        setHotStocks([]);
+        console.error("Failed to fetch market momentum:", err);
         setLoading(false);
       });
   }, []);
@@ -68,29 +67,21 @@ export default function Home() {
     );
   }
 
-  const getDirectionEmoji = (direction: string) => {
-    switch (direction) {
-      case "상승":
-        return "📈";
-      case "하락":
-        return "📉";
-      default:
-        return "➡️";
+  const formatAmount = (amount: number) => {
+    // amount는 원 단위 (KIS API 원본)
+    const billion = amount / 100000000; // 원 → 억
+    const million = amount / 10000; // 원 → 만원
+
+    if (Math.abs(billion) >= 1) {
+      // 1억 이상
+      return billion >= 0 ? `+${billion.toFixed(0)}억` : `${billion.toFixed(0)}억`;
+    } else if (Math.abs(million) >= 1) {
+      // 1만 이상
+      return million >= 0 ? `+${million.toFixed(0)}만` : `${million.toFixed(0)}만`;
+    } else {
+      // 1만 미만
+      return amount >= 0 ? `+${amount}원` : `${amount}원`;
     }
-  };
-
-  const formatDateTime = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days}일 전`;
-    if (hours > 0) return `${hours}시간 전`;
-    if (minutes > 0) return `${minutes}분 전`;
-    return "방금";
   };
 
   return (
@@ -102,98 +93,200 @@ export default function Home() {
           <p className="text-gray-600">AI 기반 주식 뉴스 분석 및 예측 시스템</p>
         </div>
 
-        {/* 최신 투자 알림 */}
-        <div className="bg-white rounded-lg shadow mb-8">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">🔔 최신 투자 알림</h2>
-              <Link
-                href="/predictions"
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-              >
-                전체 보기 →
-              </Link>
+        {/* 급등/급락 종목 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* 급등 종목 */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">🚀 급등 종목 TOP 5</h2>
+              <p className="text-sm text-gray-500 mt-1">실시간 전체 시장 기준</p>
+            </div>
+            <div className="divide-y divide-gray-200">
+              {!momentum || momentum.top_gainers.length === 0 ? (
+                <div className="px-6 py-8 text-center text-gray-500">
+                  데이터 없음
+                </div>
+              ) : (
+                momentum.top_gainers.map((stock, index) => (
+                  <Link
+                    key={stock.stock_code}
+                    href={`/stocks/${stock.stock_code}`}
+                    className="block px-6 py-3 hover:bg-gray-50 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 flex-1">
+                        <span className="text-sm font-bold text-gray-400">{index + 1}</span>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900">{stock.stock_name}</span>
+                            <span className="text-sm text-red-600 font-bold">
+                              +{stock.change_rate}%
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            {stock.current_price.toLocaleString()}원
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                ))
+              )}
             </div>
           </div>
-          <div className="divide-y divide-gray-200">
-            {latestAlerts.length === 0 ? (
-              <div className="px-6 py-12 text-center text-gray-500">
-                아직 투자 알림이 없습니다.
-              </div>
-            ) : (
-              latestAlerts.map((alert) => (
-                <div key={alert.id} className="px-6 py-4 hover:bg-gray-50 transition">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Link
-                          href={`/stocks/${alert.stock_code}`}
-                          className="inline-flex items-center px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium hover:bg-blue-200 transition"
-                        >
-                          {alert.stock_name} ({alert.stock_code})
-                        </Link>
-                        <span className="text-xs text-gray-500">
-                          {formatDateTime(alert.notified_at)}
-                        </span>
-                      </div>
-                      <h3 className="text-gray-900 font-medium mb-1 line-clamp-2">
-                        {alert.title}
-                      </h3>
-                      <p className="text-xs text-gray-500">{alert.source}</p>
-                    </div>
-                  </div>
+
+          {/* 급락 종목 */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">📉 급락 종목 TOP 5</h2>
+              <p className="text-sm text-gray-500 mt-1">실시간 전체 시장 기준</p>
+            </div>
+            <div className="divide-y divide-gray-200">
+              {!momentum || momentum.top_losers.length === 0 ? (
+                <div className="px-6 py-8 text-center text-gray-500">
+                  데이터 없음
                 </div>
-              ))
-            )}
+              ) : (
+                momentum.top_losers.map((stock, index) => (
+                  <Link
+                    key={stock.stock_code}
+                    href={`/stocks/${stock.stock_code}`}
+                    className="block px-6 py-3 hover:bg-gray-50 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 flex-1">
+                        <span className="text-sm font-bold text-gray-400">{index + 1}</span>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900">{stock.stock_name}</span>
+                            <span className="text-sm text-blue-600 font-bold">
+                              {stock.change_rate}%
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            {stock.current_price.toLocaleString()}원
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
-        {/* 오늘의 HOT 종목 */}
+        {/* 투자자 동향 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* 외국인 순매수 */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">🌐 외국인 순매수 TOP</h2>
+              <p className="text-sm text-gray-500 mt-1">오늘 외국인이 가장 많이 산 종목</p>
+            </div>
+            <div className="divide-y divide-gray-200">
+              {!momentum || momentum.foreign_buying.length === 0 ? (
+                <div className="px-6 py-8 text-center text-gray-500">
+                  데이터 없음
+                </div>
+              ) : (
+                momentum.foreign_buying.map((stock, index) => (
+                  <Link
+                    key={stock.stock_code}
+                    href={`/stocks/${stock.stock_code}`}
+                    className="block px-6 py-3 hover:bg-gray-50 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-bold text-gray-400">{index + 1}</span>
+                        <span className="font-medium text-gray-900">{stock.stock_name}</span>
+                      </div>
+                      <span className="text-sm font-bold text-green-600">
+                        {formatAmount(stock.amount)}
+                      </span>
+                    </div>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 기관 순매수 */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">🏢 기관 순매수 TOP</h2>
+              <p className="text-sm text-gray-500 mt-1">오늘 기관이 가장 많이 산 종목</p>
+            </div>
+            <div className="divide-y divide-gray-200">
+              {!momentum || momentum.institution_buying.length === 0 ? (
+                <div className="px-6 py-8 text-center text-gray-500">
+                  데이터 없음
+                </div>
+              ) : (
+                momentum.institution_buying.map((stock, index) => (
+                  <Link
+                    key={stock.stock_code}
+                    href={`/stocks/${stock.stock_code}`}
+                    className="block px-6 py-3 hover:bg-gray-50 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-bold text-gray-400">{index + 1}</span>
+                        <span className="font-medium text-gray-900">{stock.stock_name}</span>
+                      </div>
+                      <span className="text-sm font-bold text-green-600">
+                        {formatAmount(stock.amount)}
+                      </span>
+                    </div>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* AI 주목 종목 */}
         <div className="bg-white rounded-lg shadow mb-8">
           <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">🔥 오늘의 HOT 종목</h2>
-              <Link
-                href="/stocks"
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-              >
-                전체 보기 →
-              </Link>
-            </div>
-            <p className="text-sm text-gray-500 mt-1">뉴스가 많은 주목받는 종목</p>
+            <h2 className="text-xl font-bold text-gray-900">🤖 AI 주목 종목 TOP</h2>
+            <p className="text-sm text-gray-500 mt-1">최근 3일간 AI 시그널이 가장 많은 종목</p>
           </div>
           <div className="divide-y divide-gray-200">
-            {hotStocks.length === 0 ? (
+            {!momentum || momentum.sector_trends.length === 0 ? (
               <div className="px-6 py-12 text-center text-gray-500">
-                종목 정보를 불러올 수 없습니다.
+                데이터 없음
               </div>
             ) : (
-              hotStocks.map((stock, index) => (
-                <Link
-                  key={stock.stock_code}
-                  href={`/stocks/${stock.stock_code}`}
-                  className="block px-6 py-4 hover:bg-gray-50 transition"
-                >
+              momentum.sector_trends.map((sector, index) => (
+                <div key={sector.sector} className="px-6 py-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-br from-orange-400 to-pink-500 text-white rounded-full font-bold text-sm">
-                        {index + 1}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className="font-medium text-gray-900">{sector.sector}</span>
+                        {sector.sentiment === 'positive' ? (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium">
+                            📈 긍정
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full font-medium">
+                            📉 부정
+                          </span>
+                        )}
                       </div>
-                      <div>
-                        <h3 className="font-medium text-gray-900">{stock.stock_name}</h3>
-                        <p className="text-sm text-gray-500">{stock.stock_code}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-medium text-gray-900">
-                        뉴스 {stock.news_count}건
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        알림 {stock.notification_count}건
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className="text-sm text-green-600">
+                          긍정 {sector.positive_signals}건
+                        </span>
+                        <span className="text-sm text-red-600">
+                          부정 {sector.negative_signals}건
+                        </span>
+                        <span className="text-sm text-gray-500">
+                          총 {sector.total_signals}건
+                        </span>
                       </div>
                     </div>
                   </div>
-                </Link>
+                </div>
               ))
             )}
           </div>
